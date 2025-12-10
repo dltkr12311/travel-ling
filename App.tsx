@@ -5,10 +5,9 @@ import {
   Link as LinkIcon,
   Loader2,
   Map,
-  MessageCircle,
   MessageSquare,
   Share2,
-  Sunrise,
+  Sparkles,
   Users,
   Wallet,
   X,
@@ -20,7 +19,6 @@ import ChatRoom from './components/ChatRoom';
 import ExpenseView from './components/ExpenseView';
 import ItineraryView from './components/ItineraryView';
 import ProfileSetup from './components/ProfileSetup';
-import SunriseView from './components/SunriseView';
 import {
   checkSupabaseHealth,
   createTrip,
@@ -29,11 +27,17 @@ import {
   initSupabase,
   saveTrip,
 } from './services/supabaseService';
-import { Expense, GroupChatMessage, ItineraryItem, Person, TripData } from './types';
+import {
+  Expense,
+  GroupChatMessage,
+  ItineraryItem,
+  Person,
+  TripData,
+} from './types';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    'itinerary' | 'money' | 'sunrise' | 'ai' | 'chat'
+    'itinerary' | 'money' | 'ai' | 'chat'
   >('ai');
 
   // --- Admin Mode ---
@@ -271,7 +275,16 @@ const App: React.FC = () => {
       }, 1000); // 1s debounce
       return () => clearTimeout(timer);
     }
-  }, [people, expenses, budget, itinerary, messages, isDbConnected, tripId, currentUserId]);
+  }, [
+    people,
+    expenses,
+    budget,
+    itinerary,
+    messages,
+    isDbConnected,
+    tripId,
+    currentUserId,
+  ]);
 
   const handleCreateTrip = async () => {
     if (!isDbConnected) return;
@@ -503,7 +516,6 @@ const App: React.FC = () => {
                 onSetBudget={setBudget}
               />
             )}
-            {activeTab === 'sunrise' && <SunriseView />}
             {activeTab === 'ai' && (
               <AIPlanner
                 people={people}
@@ -514,7 +526,10 @@ const App: React.FC = () => {
                 onAddExpense={exp => setExpenses(prev => [...prev, exp])}
                 onSetBudget={setBudget}
                 onAddPerson={name =>
-                  setPeople(prev => [...prev, { id: Date.now().toString(), name }])
+                  setPeople(prev => [
+                    ...prev,
+                    { id: Date.now().toString(), name },
+                  ])
                 }
               />
             )}
@@ -533,7 +548,7 @@ const App: React.FC = () => {
               : 'text-slate-400 hover:text-slate-600'
           }`}
         >
-          <MessageCircle
+          <Sparkles
             size={20}
             fill={activeTab === 'ai' ? 'currentColor' : 'none'}
             strokeWidth={activeTab === 'ai' ? 2.5 : 2}
@@ -576,17 +591,6 @@ const App: React.FC = () => {
         >
           <Wallet size={20} strokeWidth={activeTab === 'money' ? 3 : 2} />
           <span className='text-[10px] font-bold mt-1'>정산</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('sunrise')}
-          className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all duration-300 ${
-            activeTab === 'sunrise'
-              ? 'text-orange-500 bg-orange-50 scale-105'
-              : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <Sunrise size={20} strokeWidth={activeTab === 'sunrise' ? 3 : 2} />
-          <span className='text-[10px] font-bold mt-1'>일출</span>
         </button>
       </nav>
 
