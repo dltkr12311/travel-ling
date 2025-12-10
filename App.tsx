@@ -274,6 +274,11 @@ const App: React.FC = () => {
             <ItineraryView
               items={itinerary}
               onAddItem={item => setItinerary([...itinerary, item])}
+              onEditItem={(id, updates) =>
+                setItinerary(
+                  itinerary.map(i => (i.id === id ? { ...i, ...updates } : i))
+                )
+              }
               onRemoveItem={id =>
                 setItinerary(itinerary.filter(i => i.id !== id))
               }
@@ -304,11 +309,11 @@ const App: React.FC = () => {
                 budget={budget}
                 expenses={expenses}
                 itineraryCount={itinerary.length}
-                onAddItinerary={item => setItinerary([...itinerary, item])}
-                onAddExpense={exp => setExpenses([...expenses, exp])}
+                onAddItinerary={item => setItinerary(prev => [...prev, item])}
+                onAddExpense={exp => setExpenses(prev => [...prev, exp])}
                 onSetBudget={setBudget}
                 onAddPerson={name =>
-                  setPeople([...people, { id: Date.now().toString(), name }])
+                  setPeople(prev => [...prev, { id: Date.now().toString(), name }])
                 }
               />
             )}
@@ -317,7 +322,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Bottom Navigation */}
-      <nav className='absolute bottom-6 left-4 right-4 bg-white/90 backdrop-blur-xl rounded-3xl px-2 py-2 z-40 shadow-2xl border border-white/50 flex justify-around items-center'>
+      <nav className='absolute bottom-nav-safe left-4 right-4 bg-white/90 backdrop-blur-xl rounded-3xl px-2 py-2 z-40 shadow-2xl border border-white/50 flex justify-around items-center'>
         {/* 비서 탭 - 첫 번째 (메인) */}
         <button
           onClick={() => setActiveTab('ai')}

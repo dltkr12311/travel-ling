@@ -1,6 +1,7 @@
 import {
   Bed,
   Car,
+  Edit3,
   GripVertical,
   Loader2,
   MapPin,
@@ -20,6 +21,7 @@ import { ItineraryItem, PlaceSearchResult } from '../types';
 interface Props {
   items: ItineraryItem[];
   onAddItem: (item: ItineraryItem) => void;
+  onEditItem: (id: string, updates: Partial<ItineraryItem>) => void;
   onRemoveItem: (id: string) => void;
   onReorder: (items: ItineraryItem[]) => void;
 }
@@ -33,10 +35,12 @@ declare global {
 const ItineraryView: React.FC<Props> = ({
   items,
   onAddItem,
+  onEditItem,
   onRemoveItem,
   onReorder,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
+  const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   // Add Item State
@@ -388,6 +392,64 @@ const ItineraryView: React.FC<Props> = ({
     }
   };
 
+  const handleEdit = async () => {
+    if (!editingItem || !newItem.title) return;
+
+    // Use existing lat/lng if selected from search, otherwise resolve via Kakao
+    let lat = newItem.lat;
+    let lng = newItem.lng;
+    let location = newItem.location || newItem.title;
+
+    if (!lat || !lng) {
+      const coords = await getCoordsFromAddress(newItem.title);
+      if (coords) {
+        lat = coords.lat;
+        lng = coords.lng;
+      } else {
+        // 기존 좌표 유지 또는 기본 속초 좌표
+        lat = editingItem.lat || 38.207;
+        lng = editingItem.lng || 128.5918;
+      }
+    }
+
+    onEditItem(editingItem.id, {
+      time: newItem.time || '12:00',
+      title: newItem.title,
+      location,
+      type: newItem.type as any,
+      notes: newItem.notes || '',
+      lat,
+      lng,
+    });
+
+    setEditingItem(null);
+    setNewItem({ type: 'activity', time: '12:00' });
+    setSearchQuery('');
+    setSearchResults([]);
+  };
+
+  const handleStartEdit = (item: ItineraryItem) => {
+    setEditingItem(item);
+    setNewItem({
+      title: item.title,
+      location: item.location,
+      time: item.time,
+      type: item.type,
+      notes: item.notes,
+      lat: item.lat,
+      lng: item.lng,
+    });
+    setSearchQuery(item.title);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingItem(null);
+    setIsAdding(false);
+    setNewItem({ type: 'activity', time: '12:00' });
+    setSearchQuery('');
+    setSearchResults([]);
+  };
+
   const handleSort = () => {
     if (dragItem.current === null || dragOverItem.current === null) return;
     const _items = [...items];
@@ -549,9 +611,18 @@ const ItineraryView: React.FC<Props> = ({
                     </div>
 
                     {/* Edit Controls */}
-                    <div className='flex flex-col gap-3 pt-0.5 pl-1'>
+                    <div className='flex flex-col gap-2 pt-0.5 pl-1'>
                       <button className='text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing'>
                         <GripVertical size={14} />
+                      </button>
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleStartEdit(item);
+                        }}
+                        className='text-slate-300 hover:text-blue-500'
+                      >
+                        <Edit3 size={12} />
                       </button>
                       <button
                         onClick={e => {
@@ -580,21 +651,23 @@ const ItineraryView: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Add Modal with Search */}
-      {isAdding && (
+      {/* Add/Edit Modal with Search */}
+      {(isAdding || editingItem) && (
         <div className='fixed inset-0 z-[100] flex items-end justify-center'>
           <div
             className='absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity'
-            onClick={() => setIsAdding(false)}
+            onClick={handleCancelEdit}
           ></div>
           <div className='bg-white w-full max-w-md rounded-t-3xl p-0 z-10 animate-in slide-in-from-bottom-10 duration-300 pb-safe shadow-2xl flex flex-col max-h-[90vh]'>
             {/* Modal Header */}
             <div className='px-6 pt-6 pb-4'>
               <div className='w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6'></div>
               <h2 className='text-2xl font-black text-slate-900 mb-1'>
-                새로운 일정
+                {editingItem ? '일정 수정' : '새로운 일정'}
               </h2>
-              <p className='text-slate-400 text-sm'>어디로 떠나시나요?</p>
+              <p className='text-slate-400 text-sm'>
+                {editingItem ? '일정 정보를 수정하세요' : '어디로 떠나시나요?'}
+              </p>
             </div>
 
             <div className='flex-1 overflow-y-auto no-scrollbar px-6 pb-6'>
@@ -763,11 +836,11 @@ const ItineraryView: React.FC<Props> = ({
                 </div>
 
                 <button
-                  onClick={handleAdd}
+                  onClick={editingItem ? handleEdit : handleAdd}
                   disabled={!newItem.title}
                   className='w-full bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all mt-4 disabled:opacity-50 flex justify-center items-center gap-2 text-lg'
                 >
-                  등록 완료
+                  {editingItem ? '수정 완료' : '등록 완료'}
                 </button>
               </div>
             </div>

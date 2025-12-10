@@ -278,31 +278,73 @@ const AIPlanner: React.FC<Props> = ({
   }, [messages]);
 
   // Execute AI action
-  const executeAction = async (action: AIAction) => {
+  const executeAction = async (
+    action: AIAction,
+    index: number = 0
+  ): Promise<boolean> => {
     try {
+      if (!action || !action.type) {
+        console.error('Invalid action:', action);
+        return false;
+      }
+
       switch (action.type) {
         case 'add_itinerary': {
           const data = action.data;
-          if (data?.title) {
+          if (!data) {
+            console.error('Action data is missing:', action);
+            return false;
+          }
+
+          if (!data.title || data.title.trim() === '') {
+            console.error('Title is missing or empty:', data);
+            return false;
+          }
+
+          try {
             const coords = await resolveItineraryPlace(data.title);
+            // 시간이 없으면 null로 설정 (나중에 편집 가능)
+            const itemTime = data.time || null;
+            // 고유 ID 생성 (타임스탬프 + 인덱스 + 랜덤)
+            const uniqueId = `${Date.now()}-${index}-${Math.random()
+              .toString(36)
+              .substr(2, 9)}`;
             const newItem: ItineraryItem = {
-              id: Date.now().toString(),
-              time: data.time || '12:00',
-              title: data.title,
+              id: uniqueId,
+              time: itemTime || '12:00', // UI에서 표시하기 위해 기본값은 설정하지만, 사용자가 편집 가능
+              title: data.title.trim(),
               location: coords?.address || data.location || data.title,
               type: data.itemType || 'activity',
               notes: data.notes || '',
               lat: coords?.lat,
               lng: coords?.lng,
             };
+            console.log(
+              `✅ Adding itinerary item ${index + 1}:`,
+              newItem.title
+            );
             onAddItinerary(newItem);
             setLastAction(action);
+            return true;
+          } catch (error) {
+            console.error(
+              `❌ Failed to add itinerary item "${data.title}":`,
+              error
+            );
+            return false;
           }
-          break;
         }
         case 'add_expense': {
           const data = action.data;
-          if (data?.amount && data?.description) {
+          if (!data) {
+            console.error('Expense action data is missing:', action);
+            return false;
+          }
+          if (!data.amount || !data.description) {
+            console.error('Expense amount or description is missing:', data);
+            return false;
+          }
+          try {
             let payerId = people[0]?.id || 'p1';
             if (data.payerName) {
               const foundPerson = people.find(p =>
@@ -310,37 +352,75 @@ const AIPlanner: React.FC<Props> = ({
               );
               if (foundPerson) payerId = foundPerson.id;
             }
+            // 고유 ID 생성
+            const uniqueId = `${Date.now()}-${index}-${Math.random()
+              .toString(36)
+              .substr(2, 9)}`;
             const newExpense: Expense = {
-              id: Date.now().toString(),
+              id: uniqueId,
               amount: data.amount,
-              description: data.description,
+              description: data.description.trim(),
               payerId: payerId,
               date: new Date().toISOString(),
             };
+            console.log(
+              `✅ Adding expense ${index + 1}:`,
+              newExpense.description
+            );
             onAddExpense(newExpense);
             setLastAction(action);
+            return true;
+          } catch (error) {
+            console.error(
+              `❌ Failed to add expense "${data.description}":`,
+              error
+            );
+            return false;
           }
-          break;
         }
         case 'set_budget': {
           const data = action.data;
-          if (data?.budget && data.budget > 0) {
+          if (!data || !data.budget || data.budget <= 0) {
+            console.error('Budget data is invalid:', data);
+            return false;
+          }
+          try {
+            console.log(`✅ Setting budget:`, data.budget);
             onSetBudget(data.budget);
             setLastAction(action);
+            return true;
+          } catch (error) {
+            console.error(`❌ Failed to set budget:`, error);
+            return false;
           }
-          break;
         }
         case 'add_person': {
           const data = action.data;
-          if (data?.personName) {
-            onAddPerson(data.personName);
-            setLastAction(action);
+          if (!data || !data.personName || data.personName.trim() === '') {
+            console.error('Person name is missing:', data);
+            return false;
           }
-          break;
+          try {
+            console.log(`✅ Adding person:`, data.personName);
+            onAddPerson(data.personName.trim());
+            setLastAction(action);
+            return true;
+          } catch (error) {
+            console.error(
+              `❌ Failed to add person "${data.personName}":`,
+              error
+            );
+            return false;
+          }
+        }
+        default: {
+          console.error('Unknown action type:', action.type);
+          return false;
         }
       }
     } catch (error) {
-      console.error('Action execution error:', error);
+      console.error('❌ Action execution error:', error, action);
+      return false;
     }
   };
 
@@ -364,15 +444,75 @@ const AIPlanner: React.FC<Props> = ({
       weatherCondition: weatherInfo?.condition,
     });
 
-    if (result.action) {
-      await executeAction(result.action);
+    // 액션 실행 결과 추적
+    let actionExecuted = false;
+    let successCount = 0;
+    let failCount = 0;
+
+    // 여러 일정이 있는 경우 우선 처리 (actions 배열)
+    if (result.actions && result.actions.length > 0) {
+      console.log(`Processing ${result.actions.length} actions from array`);
+      actionExecuted = true;
+      for (let i = 0; i < result.actions.length; i++) {
+        const action = result.actions[i];
+        // 각 일정을 순차적으로 추가 (약간의 지연으로 고유 ID 보장)
+        const success = await executeAction(action, i);
+        if (success) {
+          successCount++;
+        } else {
+          failCount++;
+          console.error(`❌ Action ${i + 1} failed:`, action);
+        }
+        // 각 일정 추가 사이에 10ms 지연 (ID 충돌 방지)
+        if (i < result.actions.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+      console.log(
+        `✅ Actions executed: ${successCount} succeeded, ${failCount} failed`
+      );
+    } else if (result.action) {
+      // 단일 액션 처리
+      actionExecuted = true;
+      const success = await executeAction(result.action, 0);
+      if (success) {
+        successCount = 1;
+      } else {
+        failCount = 1;
+        console.error('❌ Single action failed:', result.action);
+      }
+    }
+
+    // AI가 "등록했어요"라고 말했는데 실제로 action이 없는 경우 감지
+    const registrationKeywords = ['등록', '추가', '기록', '저장'];
+    const hasRegistrationText = registrationKeywords.some(keyword =>
+      result.text.includes(keyword)
+    );
+
+    if (hasRegistrationText && !actionExecuted) {
+      console.warn(
+        '⚠️ WARNING: AI said it registered but no action was executed!',
+        {
+          text: result.text,
+          hasAction: !!result.action,
+          hasActions: !!(result.actions && result.actions.length > 0),
+        }
+      );
+    }
+
+    // 일부 실패한 경우 결과 메시지 수정
+    let finalText = result.text;
+    if (actionExecuted && failCount > 0 && successCount === 0) {
+      finalText = `${result.text}\n\n⚠️ 일부 일정 등록에 실패했어요. 다시 시도해주세요.`;
+    } else if (actionExecuted && failCount > 0 && successCount > 0) {
+      finalText = `${result.text}\n\n⚠️ ${successCount}개는 등록되었지만 ${failCount}개는 실패했어요.`;
     }
 
     setMessages(prev => [
       ...prev,
       {
         role: 'model',
-        text: result.text,
+        text: finalText,
         isMapResult: result.mapLinks && result.mapLinks.length > 0,
         mapLinks: result.mapLinks,
       },
@@ -702,7 +842,7 @@ const AIPlanner: React.FC<Props> = ({
       )}
 
       {/* Input Area */}
-      <div className='p-4 bg-white/80 backdrop-blur-xl border-t border-slate-100'>
+      <div className='p-4 pb-safe bg-white/80 backdrop-blur-xl border-t border-slate-100'>
         {/* Quick chips (채팅 중일 때) */}
         {!isInitialState && (
           <div className='flex gap-2 mb-3 overflow-x-auto no-scrollbar pb-1'>
