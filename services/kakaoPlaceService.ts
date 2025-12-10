@@ -43,7 +43,7 @@ const waitForKakaoSDK = (): Promise<boolean> => {
 
 /**
  * Kakao Places API를 사용한 장소 검색
- * 속초 주변 장소를 검색합니다
+ * 속초/강원도 지역 장소를 우선 검색합니다
  */
 export const searchPlacesKakao = async (
   query: string
@@ -58,80 +58,60 @@ export const searchPlacesKakao = async (
   }
 
   return new Promise(resolve => {
-    console.log('[Kakao] Creating Places service...');
     const ps = new window.kakao.maps.services.Places();
 
-    // 속초 중심 좌표 (검색 범위 제한용)
-    const sokchoCenter = new window.kakao.maps.LatLng(38.207, 128.5918);
+    // 검색어에 지역명이 없으면 "속초"를 추가
+    const hasLocation = /속초|강릉|양양|고성|강원/.test(query);
+    const searchQuery = hasLocation ? query : `속초 ${query}`;
 
-    const options = {
-      location: sokchoCenter,
-      radius: 20000, // 20km 반경
-      sort: window.kakao.maps.services.SortBy.DISTANCE,
-    };
+    console.log(`[Kakao] Final search query: "${searchQuery}"`);
 
-    console.log('[Kakao] Calling keywordSearch...', { query, options });
+    // 정확도순 정렬 (ACCURACY)
+    ps.keywordSearch(searchQuery, (data: any[], status: string) => {
+      console.log('[Kakao] Search response:', {
+        status,
+        count: data?.length || 0,
+      });
 
-    ps.keywordSearch(
-      query,
-      (data: any[], status: string) => {
-        console.log('[Kakao] Search response:', {
-          status,
-          resultCount: data?.length || 0,
+      if (status === window.kakao.maps.services.Status.OK && data.length > 0) {
+        const results: PlaceSearchResult[] = data.slice(0, 8).map(place => ({
+          name: place.place_name,
+          address: place.road_address_name || place.address_name,
+          type: categorizePlace(place.category_group_code, place.category_name),
+          lat: parseFloat(place.y),
+          lng: parseFloat(place.x),
+          description: place.category_name?.split(' > ').pop() || '',
+        }));
+        resolve(results);
+      } else {
+        // "속초" 추가 검색이 실패하면 원본 쿼리로 재시도
+        console.log('[Kakao] Retrying with original query...');
+        ps.keywordSearch(query, (data2: any[], status2: string) => {
+          if (
+            status2 === window.kakao.maps.services.Status.OK &&
+            data2.length > 0
+          ) {
+            const results: PlaceSearchResult[] = data2
+              .slice(0, 8)
+              .map(place => ({
+                name: place.place_name,
+                address: place.road_address_name || place.address_name,
+                type: categorizePlace(
+                  place.category_group_code,
+                  place.category_name
+                ),
+                lat: parseFloat(place.y),
+                lng: parseFloat(place.x),
+                description: place.category_name?.split(' > ').pop() || '',
+              }));
+            resolve(results);
+          } else {
+            console.log('[Kakao] No results found');
+            resolve([]);
+          }
         });
-
-        if (status === window.kakao.maps.services.Status.OK) {
-          const results: PlaceSearchResult[] = data.slice(0, 5).map(place => ({
-            name: place.place_name,
-            address: place.road_address_name || place.address_name,
-            type: categorizePlace(
-              place.category_group_code,
-              place.category_name
-            ),
-            lat: parseFloat(place.y),
-            lng: parseFloat(place.x),
-            description: place.category_name?.split(' > ').pop() || '',
-          }));
-          console.log('[Kakao] Returning results:', results);
-          resolve(results);
-        } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
-          console.log(
-            '[Kakao] Zero results in Sokcho area, searching nationwide...'
-          );
-          // 결과 없으면 전국 검색
-          ps.keywordSearch(query, (data2: any[], status2: string) => {
-            console.log('[Kakao] Nationwide search response:', {
-              status: status2,
-              resultCount: data2?.length || 0,
-            });
-            if (status2 === window.kakao.maps.services.Status.OK) {
-              const results: PlaceSearchResult[] = data2
-                .slice(0, 5)
-                .map(place => ({
-                  name: place.place_name,
-                  address: place.road_address_name || place.address_name,
-                  type: categorizePlace(
-                    place.category_group_code,
-                    place.category_name
-                  ),
-                  lat: parseFloat(place.y),
-                  lng: parseFloat(place.x),
-                  description: place.category_name?.split(' > ').pop() || '',
-                }));
-              console.log('[Kakao] Returning nationwide results:', results);
-              resolve(results);
-            } else {
-              console.log('[Kakao] No results found anywhere');
-              resolve([]);
-            }
-          });
-        } else {
-          console.log('[Kakao] Search failed with status:', status);
-          resolve([]);
-        }
-      },
-      options
-    );
+      }
+    });
   });
 };
 

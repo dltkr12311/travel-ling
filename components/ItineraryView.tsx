@@ -26,7 +26,7 @@ interface Props {
 
 declare global {
   interface Window {
-    L: any;
+    kakao: any;
   }
 }
 
@@ -62,23 +62,62 @@ const ItineraryView: React.FC<Props> = ({
   // List Refs for Intersection Observer
   const itemRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
-  // 1. Initialize Map (Always visible now)
+  // Animation ref
+  const animationRef = useRef<number | null>(null);
+
+  // 부드러운 지도 이동 애니메이션
+  const smoothPanTo = (
+    targetLat: number,
+    targetLng: number,
+    duration = 500
+  ) => {
+    if (!mapInstance.current || !window.kakao?.maps) return;
+
+    // 이전 애니메이션 취소
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+
+    const startCenter = mapInstance.current.getCenter();
+    const startLat = startCenter.getLat();
+    const startLng = startCenter.getLng();
+
+    const startTime = performance.now();
+
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // easeOutCubic for smooth deceleration
+      const eased = 1 - Math.pow(1 - progress, 3);
+
+      const currentLat = startLat + (targetLat - startLat) * eased;
+      const currentLng = startLng + (targetLng - startLng) * eased;
+
+      const newCenter = new window.kakao.maps.LatLng(currentLat, currentLng);
+      mapInstance.current.setCenter(newCenter);
+
+      if (progress < 1) {
+        animationRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+  };
+
+  // 1. Initialize Kakao Map
   useEffect(() => {
-    if (!window.L || !mapContainerRef.current) return;
+    if (!window.kakao?.maps || !mapContainerRef.current) return;
 
     if (!mapInstance.current) {
-      const map = window.L.map(mapContainerRef.current, {
-        zoomControl: false,
-        attributionControl: false,
-      }).setView([38.207, 128.5918], 12);
+      const options = {
+        center: new window.kakao.maps.LatLng(38.207, 128.5918), // 속초
+        level: 7, // 확대 레벨 (숫자가 작을수록 확대)
+      };
 
-      window.L.tileLayer(
-        'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        {
-          attribution: '',
-        }
-      ).addTo(map);
+      const map = new window.kakao.maps.Map(mapContainerRef.current, options);
 
+      // 지도 컨트롤 제거 (깔끔한 UI)
       mapInstance.current = map;
     }
 
@@ -86,79 +125,103 @@ const ItineraryView: React.FC<Props> = ({
     updateMapMarkers();
   }, [items]);
 
-  // 2. Update Markers Function
+  // 2. Update Markers Function (Kakao Maps)
   const updateMapMarkers = () => {
-    if (!mapInstance.current) return;
+    if (!mapInstance.current || !window.kakao?.maps) return;
 
-    // Clear existing
-    markersRef.current.forEach(m => m.remove());
+    // Clear existing markers
+    markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
-    if (polylineRef.current) polylineRef.current.remove();
+    if (polylineRef.current) polylineRef.current.setMap(null);
 
-    const latLngs: any[] = [];
+    const bounds = new window.kakao.maps.LatLngBounds();
+    const linePath: any[] = [];
 
     items.forEach((item, index) => {
       if (item.lat && item.lng) {
         const isActive = activeId === item.id;
+        const position = new window.kakao.maps.LatLng(item.lat, item.lng);
 
-        const markerHtml = `
-                <div class="transition-all duration-300 ${
-                  isActive ? 'scale-125 z-[1000]' : 'scale-100'
-                }">
-                    <div class="w-6 h-6 rounded-full ${
-                      isActive ? 'bg-blue-600' : 'bg-slate-700'
-                    } border-2 border-white shadow-lg flex items-center justify-center text-white font-bold text-[10px]">
-                        ${index + 1}
-                    </div>
-                    ${
-                      isActive
-                        ? `<div class="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-blue-600 rotate-45"></div>`
-                        : ''
-                    }
-                </div>
-              `;
+        // 커스텀 마커 이미지 생성
+        const size = isActive ? 32 : 28;
+        const markerContent = document.createElement('div');
+        markerContent.style.cssText = `
+          position: relative;
+          width: ${size}px;
+          height: ${size}px;
+          margin-left: -${size / 2}px;
+          margin-top: -${size / 2}px;
+        `;
+        markerContent.innerHTML = `
+          <div style="
+            width: 100%;
+            height: 100%;
+            background: ${isActive ? '#2563eb' : '#334155'};
+            border: 2px solid white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: ${isActive ? '14px' : '12px'};
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            cursor: pointer;
+          ">${index + 1}</div>
+        `;
 
-        const icon = window.L.divIcon({
-          html: markerHtml,
-          className: 'bg-transparent',
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
+        // CustomOverlay 사용 (yAnchor/xAnchor 제거, margin으로 직접 조절)
+        const customOverlay = new window.kakao.maps.CustomOverlay({
+          position: position,
+          content: markerContent,
         });
 
-        const marker = window.L.marker([item.lat, item.lng], { icon }).addTo(
-          mapInstance.current
-        );
+        customOverlay.setMap(mapInstance.current);
 
-        // Click marker to scroll to item
-        marker.on('click', () => {
+        // 클릭 이벤트
+        markerContent.onclick = () => {
           const el = itemRefs.current[item.id];
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             setActiveId(item.id);
           }
-        });
+        };
 
-        markersRef.current.push(marker);
-        latLngs.push([item.lat, item.lng]);
+        markersRef.current.push(customOverlay);
+        bounds.extend(position);
+        linePath.push(position);
       }
     });
 
-    // Draw line
-    if (latLngs.length > 0) {
-      polylineRef.current = window.L.polyline(latLngs, {
-        color: '#94a3b8', // slate-400
-        weight: 2,
-        opacity: 0.6,
-        dashArray: '4, 4',
-        lineCap: 'round',
-      }).addTo(mapInstance.current);
+    // Draw polyline (경로선)
+    if (linePath.length > 1) {
+      polylineRef.current = new window.kakao.maps.Polyline({
+        path: linePath,
+        strokeWeight: 3,
+        strokeColor: '#94a3b8', // slate-400
+        strokeOpacity: 0.7,
+        strokeStyle: 'shortdash',
+      });
+      polylineRef.current.setMap(mapInstance.current);
+    }
 
-      // Fit bounds only initially or if no active ID
-      if (!activeId) {
-        mapInstance.current.fitBounds(window.L.latLngBounds(latLngs), {
-          padding: [50, 50],
-          paddingBottomRight: [0, 200], // Offset for list overlap if needed
-        });
+    // Fit bounds (지도 영역 자동 조절)
+    if (linePath.length > 0 && !activeId) {
+      // 전체 경로 보기 (축소)
+      mapInstance.current.setBounds(bounds, 50, 50, 50, 50);
+    } else if (activeId) {
+      // 트리플 스타일: 활성화된 아이템으로 부드럽게 이동
+      const activeItem = items.find(i => i.id === activeId);
+      if (activeItem?.lat && activeItem?.lng) {
+        const currentLevel = mapInstance.current.getLevel();
+
+        // 현재 줌이 멀면 먼저 확대
+        if (currentLevel > 4) {
+          mapInstance.current.setLevel(4, { animate: true });
+        }
+
+        // 부드럽게 애니메이션 이동
+        smoothPanTo(activeItem.lat, activeItem.lng, 400);
       }
     }
   };
@@ -219,11 +282,22 @@ const ItineraryView: React.FC<Props> = ({
             setActiveId(closestId);
 
             const item = items.find(i => i.id === closestId);
-            if (item?.lat && item?.lng && mapInstance.current) {
-              mapInstance.current.flyTo([item.lat, item.lng], 14, {
-                animate: true,
-                duration: 0.8,
-              });
+            if (
+              item?.lat &&
+              item?.lng &&
+              mapInstance.current &&
+              window.kakao?.maps
+            ) {
+              // 트리플 스타일: 부드러운 확대 + 이동
+              const currentLevel = mapInstance.current.getLevel();
+
+              // 현재 줌이 멀면 먼저 확대
+              if (currentLevel > 4) {
+                mapInstance.current.setLevel(4, { animate: true });
+              }
+
+              // 부드럽게 애니메이션 이동
+              smoothPanTo(item.lat, item.lng, 400);
             }
           }
 

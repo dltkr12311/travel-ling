@@ -5,14 +5,15 @@ import {
   Link as LinkIcon,
   Loader2,
   Map,
+  MessageCircle,
   Share2,
-  Sparkles,
   Sunrise,
   Users,
   Wallet,
   X,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
+import AdminView from './components/AdminView';
 import AIPlanner from './components/AIPlanner';
 import ExpenseView from './components/ExpenseView';
 import ItineraryView from './components/ItineraryView';
@@ -29,7 +30,18 @@ import { Expense, ItineraryItem, Person, TripData } from './types';
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     'itinerary' | 'money' | 'sunrise' | 'ai'
-  >('itinerary');
+  >('ai');
+
+  // --- Admin Mode ---
+  const [isAdminMode, setIsAdminMode] = useState(false);
+
+  // Check for /admin URL
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path === '/admin') {
+      setIsAdminMode(true);
+    }
+  }, []);
 
   // --- Cloud / Share State ---
   const [tripId, setTripId] = useState<string | null>(null);
@@ -73,40 +85,7 @@ const App: React.FC = () => {
 
   const [itinerary, setItinerary] = useState<ItineraryItem[]>(() => {
     const saved = localStorage.getItem('sokcho_itinerary');
-    return saved
-      ? JSON.parse(saved)
-      : [
-          {
-            id: '1',
-            time: '14:00',
-            title: '속초 도착',
-            location: '속초시외버스터미널',
-            type: 'travel',
-            notes: '버스표 미리 확인하기',
-            lat: 38.2127,
-            lng: 128.5916,
-          },
-          {
-            id: '2',
-            time: '18:00',
-            title: '아바이 마을 저녁 식사',
-            location: '아바이마을',
-            type: 'food',
-            notes: '오징어 순대 먹기',
-            lat: 38.2032,
-            lng: 128.5913,
-          },
-          {
-            id: '3',
-            time: '20:00',
-            title: '속초아이 관람차',
-            location: '속초해수욕장',
-            type: 'activity',
-            notes: '야경 사진 찍기',
-            lat: 38.1906,
-            lng: 128.6033,
-          },
-        ];
+    return saved ? JSON.parse(saved) : [];
   });
 
   const verifyConnection = useCallback(async () => {
@@ -148,9 +127,8 @@ const App: React.FC = () => {
       setTripId(tid);
       if (isDbConnected) {
         loadTripFromCloud(tid);
-      } else {
-        setShowShareModal(true); // Prompt to connect DB to view trip
       }
+      // 링크로 들어온 사람에게는 모달 안 띄움 - 자동 연결 대기
     }
   }, [isDbConnected]);
 
@@ -233,6 +211,28 @@ const App: React.FC = () => {
     setItinerary(newItems);
   };
 
+  const exitAdminMode = () => {
+    setIsAdminMode(false);
+    window.history.pushState({}, '', '/');
+  };
+
+  // ===== ADMIN PAGE =====
+  if (isAdminMode) {
+    return (
+      <AdminView
+        people={people}
+        expenses={expenses}
+        itinerary={itinerary}
+        budget={budget}
+        onSetPeople={setPeople}
+        onSetExpenses={setExpenses}
+        onSetItinerary={setItinerary}
+        onSetBudget={setBudget}
+        onExit={exitAdminMode}
+      />
+    );
+  }
+
   return (
     <div className='h-screen bg-[#f2f4f6] font-sans text-slate-800 flex flex-col max-w-md mx-auto shadow-2xl overflow-hidden relative'>
       {/* Header */}
@@ -298,13 +298,42 @@ const App: React.FC = () => {
               />
             )}
             {activeTab === 'sunrise' && <SunriseView />}
-            {activeTab === 'ai' && <AIPlanner />}
+            {activeTab === 'ai' && (
+              <AIPlanner
+                people={people}
+                budget={budget}
+                expenses={expenses}
+                itineraryCount={itinerary.length}
+                onAddItinerary={item => setItinerary([...itinerary, item])}
+                onAddExpense={exp => setExpenses([...expenses, exp])}
+                onSetBudget={setBudget}
+                onAddPerson={name =>
+                  setPeople([...people, { id: Date.now().toString(), name }])
+                }
+              />
+            )}
           </div>
         )}
       </main>
 
       {/* Bottom Navigation */}
       <nav className='absolute bottom-6 left-4 right-4 bg-white/90 backdrop-blur-xl rounded-3xl px-2 py-2 z-40 shadow-2xl border border-white/50 flex justify-around items-center'>
+        {/* 비서 탭 - 첫 번째 (메인) */}
+        <button
+          onClick={() => setActiveTab('ai')}
+          className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all duration-300 ${
+            activeTab === 'ai'
+              ? 'text-blue-600 bg-blue-50 scale-105'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <MessageCircle
+            size={20}
+            fill={activeTab === 'ai' ? 'currentColor' : 'none'}
+            strokeWidth={activeTab === 'ai' ? 2.5 : 2}
+          />
+          <span className='text-[10px] font-bold mt-1'>비서</span>
+        </button>
         <button
           onClick={() => setActiveTab('itinerary')}
           className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all duration-300 ${
@@ -326,21 +355,6 @@ const App: React.FC = () => {
         >
           <Wallet size={20} strokeWidth={activeTab === 'money' ? 3 : 2} />
           <span className='text-[10px] font-bold mt-1'>정산</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('ai')}
-          className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all duration-300 ${
-            activeTab === 'ai'
-              ? 'text-blue-600 bg-blue-50 scale-105'
-              : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <Sparkles
-            size={20}
-            fill={activeTab === 'ai' ? 'currentColor' : 'none'}
-            strokeWidth={activeTab === 'ai' ? 2 : 2}
-          />
-          <span className='text-[10px] font-bold mt-1'>AI</span>
         </button>
         <button
           onClick={() => setActiveTab('sunrise')}
