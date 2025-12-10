@@ -17,13 +17,16 @@ import AdminView from './components/AdminView';
 import AIPlanner from './components/AIPlanner';
 import ChatRoom from './components/ChatRoom';
 import ExpenseView from './components/ExpenseView';
+import IdLogin from './components/IdLogin';
 import ItineraryView from './components/ItineraryView';
 import ProfileSetup from './components/ProfileSetup';
 import {
   checkSupabaseHealth,
   createTrip,
   fetchTrip,
+  findUserProfileByDisplayId,
   getSupabaseClient,
+  getUserProfile,
   initSupabase,
   saveTrip,
 } from './services/supabaseService';
@@ -34,6 +37,7 @@ import {
   Person,
   TripData,
 } from './types';
+import { getOrCreateUserId } from './utils/browserFingerprint';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
@@ -85,10 +89,31 @@ const App: React.FC = () => {
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
   // --- Profile Setup State ---
-  const [currentUserId, setCurrentUserId] = useState<string | null>(() =>
-    localStorage.getItem('current_user_id')
-  );
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
+    // tripId가 있으면 브라우저 지문으로 일관된 ID 생성
+    const savedTripId =
+      localStorage.getItem('sokcho_trip_id') ||
+      new URLSearchParams(window.location.search).get('trip');
+
+    if (savedTripId) {
+      // 브라우저 지문 기반으로 일관된 userId 생성
+      const fingerprintUserId = getOrCreateUserId(savedTripId);
+
+      // localStorage에 저장 (이전 버전 호환)
+      const stored = localStorage.getItem('current_user_id');
+      if (!stored) {
+        localStorage.setItem('current_user_id', fingerprintUserId);
+      }
+
+      // 브라우저 지문 기반 ID 사용
+      return fingerprintUserId;
+    }
+
+    // tripId가 없으면 기존 방식
+    return localStorage.getItem('current_user_id');
+  });
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [showIdLogin, setShowIdLogin] = useState(false);
 
   // --- Data State ---
   const [people, setPeople] = useState<Person[]>(() => {
@@ -177,7 +202,107 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // 2. Check for profile setup when joining via link
+  // 1.5. Update userId when tripId changes
+  useEffect(() => {
+    if (tripId) {
+      // tripId가 변경되면 브라우저 지문 기반 userId 생성
+      const fingerprintUserId = getOrCreateUserId(tripId);
+      setCurrentUserId(fingerprintUserId);
+      localStorage.setItem('current_user_id', fingerprintUserId);
+      localStorage.setItem(`user_id_${tripId}`, fingerprintUserId);
+    }
+  }, [tripId]);
+
+  // 2. Check for profile setup when joining via link & restore profile
+  useEffect(() => {
+    const restoreProfile = async () => {
+      // Supabase가 연결되어 있고, tripId가 있으면 프로필 복원 시도
+      if (isDbConnected && tripId) {
+        try {
+          // 1. 브라우저 지문 기반 userId로 프로필 찾기
+          if (currentUserId) {
+            const profile = await getUserProfile(tripId, currentUserId);
+
+            if (profile) {
+              // 프로필이 있으면 people 배열에 추가 (이미 있으면 스킵)
+              setPeople((prev: Person[]) => {
+                const exists = prev.find(p => p.id === currentUserId);
+                if (exists) return prev;
+
+                return [
+                  ...prev,
+                  {
+                    id: currentUserId,
+                    name: profile.name,
+                    profilePic: profile.profilePic,
+                    joinedAt: new Date().toISOString(),
+                  },
+                ];
+              });
+              console.log(
+                '✅ Profile restored from Supabase (by fingerprint):',
+                profile.name
+              );
+              return;
+            }
+          }
+
+          // 2. 아이디로 프로필 찾기 (캐시 삭제된 경우)
+          const savedDisplayId = localStorage.getItem(`display_id_${tripId}`);
+          if (savedDisplayId) {
+            const profileById = await findUserProfileByDisplayId(
+              tripId,
+              savedDisplayId
+            );
+
+            if (profileById) {
+              // 아이디로 찾은 프로필이 있으면 userId 업데이트
+              setCurrentUserId(profileById.userId);
+              localStorage.setItem('current_user_id', profileById.userId);
+              localStorage.setItem(`user_id_${tripId}`, profileById.userId);
+
+              // 프로필이 있으면 people 배열에 추가
+              setPeople((prev: Person[]) => {
+                const exists = prev.find(p => p.id === profileById.userId);
+                if (exists) return prev;
+
+                return [
+                  ...prev,
+                  {
+                    id: profileById.userId,
+                    name: profileById.name,
+                    profilePic: profileById.profilePic,
+                    joinedAt: new Date().toISOString(),
+                  },
+                ];
+              });
+              console.log(
+                '✅ Profile restored from Supabase (by ID):',
+                profileById.name
+              );
+              return;
+            }
+          }
+
+          // 3. 찾지 못했으면 처음 방문자로 간주하고 프로필 설정 화면 표시
+          console.log('ℹ️ First visit detected - showing profile setup');
+          if (!currentUserId) {
+            // 처음 방문자: 프로필 설정 화면 표시 (아이디는 선택사항으로 입력 가능)
+            setShowProfileSetup(true);
+          }
+        } catch (error) {
+          console.error('Failed to restore profile:', error);
+          // 에러가 나도 처음 방문자로 간주하고 프로필 설정 화면 표시
+          if (tripId && !currentUserId) {
+            setShowProfileSetup(true);
+          }
+        }
+      }
+    };
+
+    restoreProfile();
+  }, [isDbConnected, tripId, currentUserId]);
+
   useEffect(() => {
     // 링크로 들어온 경우 (tripId가 있고 프로필이 없으면) 프로필 설정 표시
     if (tripId && !currentUserId) {
@@ -215,11 +340,50 @@ const App: React.FC = () => {
           if (payload.new && payload.new.data) {
             const data = payload.new.data as TripData;
             // 다른 사용자의 변경사항만 반영 (자신의 변경은 이미 로컬에 있음)
-            setPeople(data.people);
+            // 현재 사용자의 프로필은 유지하고 나머지만 업데이트
+            setPeople((prev: Person[]) => {
+              // 더미 데이터 필터링 (id가 'p'로 시작하는 것은 제외)
+              const realPeopleFromServer = data.people.filter(
+                (p: Person) => !p.id.startsWith('p')
+              );
+
+              if (!currentUserId) return realPeopleFromServer;
+
+              // 현재 사용자의 최신 프로필 찾기
+              const myProfile = prev.find(p => p.id === currentUserId);
+
+              if (!myProfile) return realPeopleFromServer;
+
+              // Supabase 데이터에서 현재 사용자 제외
+              const othersFromServer = realPeopleFromServer.filter(
+                p => p.id !== currentUserId
+              );
+
+              // 현재 사용자 프로필 + 다른 사용자들
+              return [myProfile, ...othersFromServer];
+            });
             setExpenses(data.expenses);
             setBudget(data.budget);
             setItinerary(data.itinerary);
-            setMessages(data.messages || []);
+            // 메시지 병합 (id 기준 중복 제거)
+            setMessages((prev: GroupChatMessage[]) => {
+              const serverMessages = data.messages || [];
+              const allMessages = [...prev];
+
+              // 서버 메시지 중 로컬에 없는 것만 추가
+              serverMessages.forEach((msg: GroupChatMessage) => {
+                if (!allMessages.find(m => m.id === msg.id)) {
+                  allMessages.push(msg);
+                }
+              });
+
+              // timestamp 순으로 정렬
+              return allMessages.sort(
+                (a, b) =>
+                  new Date(a.timestamp).getTime() -
+                  new Date(b.timestamp).getTime()
+              );
+            });
           }
         }
       )
@@ -241,11 +405,49 @@ const App: React.FC = () => {
     setIsSyncing(true);
     const data = await fetchTrip(tid);
     if (data) {
-      setPeople(data.people);
+      // 현재 사용자의 프로필은 유지하고 나머지만 업데이트
+      setPeople((prev: Person[]) => {
+        // 더미 데이터 필터링 (id가 'p'로 시작하는 것은 제외)
+        const realPeopleFromServer = data.people.filter(
+          (p: Person) => !p.id.startsWith('p')
+        );
+
+        if (!currentUserId) return realPeopleFromServer;
+
+        // 현재 사용자의 최신 프로필 찾기
+        const myProfile = prev.find(p => p.id === currentUserId);
+
+        if (!myProfile) return realPeopleFromServer;
+
+        // Supabase 데이터에서 현재 사용자 제외
+        const othersFromServer = realPeopleFromServer.filter(
+          p => p.id !== currentUserId
+        );
+
+        // 현재 사용자 프로필 + 다른 사용자들
+        return [myProfile, ...othersFromServer];
+      });
       setExpenses(data.expenses);
       setBudget(data.budget);
       setItinerary(data.itinerary);
-      setMessages(data.messages || []);
+      // 메시지 병합 (id 기준 중복 제거)
+      setMessages((prev: GroupChatMessage[]) => {
+        const serverMessages = data.messages || [];
+        const allMessages = [...prev];
+
+        // 서버 메시지 중 로컬에 없는 것만 추가
+        serverMessages.forEach((msg: GroupChatMessage) => {
+          if (!allMessages.find(m => m.id === msg.id)) {
+            allMessages.push(msg);
+          }
+        });
+
+        // timestamp 순으로 정렬
+        return allMessages.sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+      });
       setLastSynced(new Date());
     }
     setIsSyncing(false);
@@ -262,8 +464,10 @@ const App: React.FC = () => {
 
     // Cloud Save (If connected and tripId exists)
     if (isDbConnected && tripId) {
+      // 더미 데이터 필터링 (id가 'p'로 시작하는 것은 제외)
+      const realPeople = people.filter((p: Person) => !p.id.startsWith('p'));
       const data: TripData = {
-        people,
+        people: realPeople,
         expenses,
         budget,
         itinerary,
@@ -296,8 +500,10 @@ const App: React.FC = () => {
     }
 
     setIsSyncing(true);
+    // 더미 데이터 필터링 (id가 'p'로 시작하는 것은 제외)
+    const realPeople = people.filter((p: Person) => !p.id.startsWith('p'));
     const data: TripData = {
-      people,
+      people: realPeople,
       expenses,
       budget,
       itinerary,
@@ -318,28 +524,81 @@ const App: React.FC = () => {
     window.history.pushState({ path: newUrl }, '', newUrl);
   };
 
-  const handleProfileSetupComplete = (name: string, profilePic: string) => {
-    const newUserId = Date.now().toString();
+  const handleProfileSetupComplete = async (
+    nickname: string,
+    profilePic: string
+  ) => {
+    // tripId가 있으면 브라우저 지문 기반 ID 사용, 없으면 타임스탬프 기반
+    let newUserId: string;
+
+    if (tripId) {
+      // 브라우저 지문 기반으로 일관된 ID 생성
+      newUserId = getOrCreateUserId(tripId);
+    } else {
+      // tripId가 없으면 (로컬 모드) 타임스탬프 기반
+      newUserId = Date.now().toString();
+    }
+
+    // 닉네임을 name과 displayId 둘 다로 사용
     const newPerson: Person = {
       id: newUserId,
-      name,
+      name: nickname,
       profilePic,
       joinedAt: new Date().toISOString(),
     };
 
-    // Add to people list
-    setPeople((prev: Person[]) => [...prev, newPerson]);
+    // Add to people list (update if exists, add if new)
+    setPeople((prev: Person[]) => {
+      const existingIndex = prev.findIndex(p => p.id === newUserId);
+      if (existingIndex !== -1) {
+        // 기존 항목 업데이트
+        const updated = [...prev];
+        updated[existingIndex] = newPerson;
+        return updated;
+      } else {
+        // 새 항목 추가
+        return [...prev, newPerson];
+      }
+    });
 
-    // Save current user ID
+    // Save current user ID (localStorage for offline access)
     setCurrentUserId(newUserId);
     localStorage.setItem('current_user_id', newUserId);
+
+    // tripId가 있으면 trip-specific 저장소에도 저장
+    if (tripId) {
+      localStorage.setItem(`user_id_${tripId}`, newUserId);
+      // 닉네임을 displayId로도 저장 (캐시 삭제 후 복원용)
+      localStorage.setItem(`display_id_${tripId}`, nickname);
+    }
+
+    // Save to Supabase if connected
+    if (isDbConnected && tripId) {
+      try {
+        const { saveUserProfile } = await import('./services/supabaseService');
+        // 닉네임을 name과 displayId 둘 다로 사용
+        const saved = await saveUserProfile(
+          tripId,
+          newUserId,
+          nickname,
+          profilePic,
+          nickname // displayId도 닉네임으로 저장
+        );
+        if (saved) {
+          console.log('✅ Profile saved to Supabase with nickname:', nickname);
+        }
+      } catch (error) {
+        console.error('Failed to save profile to Supabase:', error);
+        // Continue anyway - localStorage에 저장되어 있음
+      }
+    }
 
     // Add system message
     const systemMessage: GroupChatMessage = {
       id: Date.now().toString(),
       userId: 'system',
       userName: '시스템',
-      text: `${name}님이 여행방에 참여했습니다 🎉`,
+      text: `${nickname}님이 여행방에 참여했습니다 🎉`,
       timestamp: new Date().toISOString(),
       type: 'system',
     };
@@ -347,6 +606,53 @@ const App: React.FC = () => {
 
     // Close modal
     setShowProfileSetup(false);
+  };
+
+  const handleIdLogin = async (displayId: string) => {
+    if (!tripId || !isDbConnected) {
+      console.error('Cannot login: tripId or Supabase not connected');
+      return;
+    }
+
+    try {
+      // 아이디로 프로필 찾기
+      const profile = await findUserProfileByDisplayId(tripId, displayId);
+
+      if (profile) {
+        // 프로필 찾았으면 userId 업데이트 및 복원
+        setCurrentUserId(profile.userId);
+        localStorage.setItem('current_user_id', profile.userId);
+        localStorage.setItem(`user_id_${tripId}`, profile.userId);
+        localStorage.setItem(`display_id_${tripId}`, displayId);
+
+        // 프로필이 있으면 people 배열에 추가
+        setPeople((prev: Person[]) => {
+          const exists = prev.find(p => p.id === profile.userId);
+          if (exists) return prev;
+
+          return [
+            ...prev,
+            {
+              id: profile.userId,
+              name: profile.name,
+              profilePic: profile.profilePic,
+              joinedAt: new Date().toISOString(),
+            },
+          ];
+        });
+
+        console.log('✅ Profile restored by ID:', profile.name);
+        setShowIdLogin(false);
+      } else {
+        // 프로필을 찾지 못했으면 알림
+        alert(
+          '입력하신 아이디로 프로필을 찾을 수 없어요.\n처음 사용하시는 경우 프로필을 설정해주세요.'
+        );
+      }
+    } catch (error) {
+      console.error('Failed to login with ID:', error);
+      alert('프로필을 불러오는 중 오류가 발생했어요. 다시 시도해주세요.');
+    }
   };
 
   const handleSaveSupabaseConfig = async () => {
@@ -733,9 +1039,36 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* --- ID LOGIN MODAL --- */}
+      {showIdLogin && (
+        <IdLogin
+          onLogin={handleIdLogin}
+          onNewUser={() => {
+            setShowIdLogin(false);
+            setShowProfileSetup(true);
+          }}
+        />
+      )}
+
       {/* --- PROFILE SETUP MODAL --- */}
       {showProfileSetup && (
-        <ProfileSetup onComplete={handleProfileSetupComplete} />
+        <ProfileSetup
+          onComplete={handleProfileSetupComplete}
+          onCancel={
+            showIdLogin || (tripId && !currentUserId)
+              ? undefined
+              : () => setShowProfileSetup(false)
+          }
+          onLoginWithId={
+            isDbConnected && tripId
+              ? () => {
+                  setShowProfileSetup(false);
+                  setShowIdLogin(true);
+                }
+              : undefined
+          }
+          isRequired={tripId !== null && !currentUserId}
+        />
       )}
     </div>
   );
