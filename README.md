@@ -13,8 +13,21 @@ View your app in AI Studio: https://ai.studio/apps/drive/1g10-gY3DDb8rSmmRjGS892
 **Prerequisites:**  Node.js
 
 
-1. Install dependencies:
+1. Copy `.env.example` to `.env.local` and fill in `GEMINI_API_KEY`. Optionally set `VITE_API_URL` to your backend (defaults to `http://localhost:3000`).
+2. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Backend (NestJS + PostgreSQL)
+
+1. Create a PostgreSQL database and update `server/.env` based on `server/.env.example`.
+2. Install backend dependencies and run the API server:
+   ```bash
+   cd server
+   npm install
+   npm run start:dev
+   ```
+   The server listens on `PORT` (default `3000`), exposes `GET /health` for quick checks, and automatically manages the `trips` table.
+3. Verify the backend is up with `curl http://localhost:3000/health` and ensure it returns `{ "status": "ok" }`.
+4. In the web app, set the API 서버 URL to your NestJS server (e.g., `http://localhost:3000`) from the 공유 모달 and start syncing trips.
