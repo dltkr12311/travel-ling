@@ -2,24 +2,28 @@ import {
   AlertTriangle,
   ArrowLeft,
   Database,
+  MessageSquare,
   RefreshCw,
   Settings,
   Trash2,
   UserMinus,
+  UserPlus,
   Users,
 } from 'lucide-react';
-import React from 'react';
-import { Expense, ItineraryItem, Person } from '../types';
+import React, { useState } from 'react';
+import { Expense, GroupChatMessage, ItineraryItem, Person } from '../types';
 
 interface Props {
   people: Person[];
   expenses: Expense[];
   itinerary: ItineraryItem[];
   budget: number;
+  messages: GroupChatMessage[];
   onSetPeople: (people: Person[]) => void;
   onSetExpenses: (expenses: Expense[]) => void;
   onSetItinerary: (itinerary: ItineraryItem[]) => void;
   onSetBudget: (budget: number) => void;
+  onSetMessages: (messages: GroupChatMessage[]) => void;
   onExit: () => void;
 }
 
@@ -28,12 +32,40 @@ const AdminView: React.FC<Props> = ({
   expenses,
   itinerary,
   budget,
+  messages,
   onSetPeople,
   onSetExpenses,
   onSetItinerary,
   onSetBudget,
+  onSetMessages,
   onExit,
 }) => {
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberEmoji, setNewMemberEmoji] = useState('👤');
+
+  const quickEmojis = ['👤', '😀', '😎', '🤓', '🥳', '🤠', '👨', '👩'];
+
+  const handleAddMember = () => {
+    if (!newMemberName.trim()) {
+      alert('이름을 입력해주세요.');
+      return;
+    }
+
+    const newPerson: Person = {
+      id: Date.now().toString(),
+      name: newMemberName.trim(),
+      profilePic: newMemberEmoji,
+      joinedAt: new Date().toISOString(),
+    };
+
+    onSetPeople([...people, newPerson]);
+    setNewMemberName('');
+    setNewMemberEmoji('👤');
+    setShowAddMember(false);
+    alert(`${newMemberName}님이 추가되었습니다.`);
+  };
+
   const handleRemovePerson = (id: string) => {
     if (people.length <= 1) {
       alert('최소 1명의 멤버가 필요합니다.');
@@ -59,10 +91,14 @@ const AdminView: React.FC<Props> = ({
       onSetExpenses([]);
       onSetItinerary([]);
       onSetBudget(0);
+      onSetMessages([]);
       localStorage.removeItem('sokcho_people');
       localStorage.removeItem('sokcho_expenses');
       localStorage.removeItem('sokcho_itinerary');
       localStorage.removeItem('sokcho_budget');
+      localStorage.removeItem('sokcho_messages');
+      localStorage.removeItem('current_user_id');
+      localStorage.removeItem('sokcho_trip_id');
       alert('모든 데이터가 초기화되었습니다.');
     }
   };
@@ -80,6 +116,15 @@ const AdminView: React.FC<Props> = ({
     if (confirm(`일정 ${itinerary.length}건을 모두 삭제합니다. 계속할까요?`)) {
       onSetItinerary([]);
       alert('일정이 초기화되었습니다.');
+    }
+  };
+
+  const handleClearMessages = () => {
+    if (
+      confirm(`채팅 메시지 ${messages.length}건을 모두 삭제합니다. 계속할까요?`)
+    ) {
+      onSetMessages([]);
+      alert('채팅 메시지가 초기화되었습니다.');
     }
   };
 
@@ -119,12 +164,17 @@ const AdminView: React.FC<Props> = ({
                 }`}
               >
                 <div className='flex items-center gap-3'>
-                  <div className='w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-sm font-bold'>
-                    {person.name.slice(0, 2)}
+                  <div className='w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-lg'>
+                    {person.profilePic || person.name.slice(0, 2)}
                   </div>
                   <div>
                     <p className='font-bold'>{person.name}</p>
-                    <p className='text-xs text-slate-500'>ID: {person.id}</p>
+                    <p className='text-xs text-slate-500'>
+                      ID: {person.id}
+                      {person.joinedAt &&
+                        ` • 가입: ${new Date(person.joinedAt).toLocaleDateString('ko-KR')}`
+                      }
+                    </p>
                   </div>
                 </div>
                 <button
@@ -136,6 +186,74 @@ const AdminView: React.FC<Props> = ({
               </div>
             ))}
           </div>
+
+          {/* 멤버 추가 버튼 & 폼 */}
+          {!showAddMember ? (
+            <button
+              onClick={() => setShowAddMember(true)}
+              className='w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-2xl transition-colors flex items-center justify-center gap-2'
+            >
+              <UserPlus size={18} />
+              멤버 추가
+            </button>
+          ) : (
+            <div className='mt-3 bg-slate-800 rounded-2xl p-4 space-y-3'>
+              <div>
+                <label className='text-xs font-bold text-slate-400 mb-2 block'>
+                  프로필 아이콘
+                </label>
+                <div className='flex gap-2'>
+                  {quickEmojis.map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => setNewMemberEmoji(emoji)}
+                      className={`text-2xl w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+                        newMemberEmoji === emoji
+                          ? 'bg-blue-600 scale-110'
+                          : 'bg-slate-700 hover:bg-slate-600'
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className='text-xs font-bold text-slate-400 mb-2 block'>
+                  이름
+                </label>
+                <input
+                  type='text'
+                  placeholder='멤버 이름 입력'
+                  value={newMemberName}
+                  onChange={e => setNewMemberName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAddMember()}
+                  maxLength={10}
+                  className='w-full bg-slate-700 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-shadow'
+                />
+              </div>
+
+              <div className='flex gap-2'>
+                <button
+                  onClick={handleAddMember}
+                  className='flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors'
+                >
+                  추가
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddMember(false);
+                    setNewMemberName('');
+                    setNewMemberEmoji('👤');
+                  }}
+                  className='flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl transition-colors'
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* 데이터 현황 */}
@@ -157,12 +275,18 @@ const AdminView: React.FC<Props> = ({
               <p className='text-xs text-slate-500 mt-1'>일정</p>
             </div>
             <div className='bg-slate-800 rounded-2xl p-4'>
+              <p className='text-3xl font-black text-green-400'>
+                {messages.length}
+              </p>
+              <p className='text-xs text-slate-500 mt-1'>채팅 메시지</p>
+            </div>
+            <div className='bg-slate-800 rounded-2xl p-4'>
               <p className='text-3xl font-black text-orange-400'>
                 {budget > 0 ? `${Math.round(budget / 10000)}만` : '-'}
               </p>
               <p className='text-xs text-slate-500 mt-1'>예산</p>
             </div>
-            <div className='bg-slate-800 rounded-2xl p-4'>
+            <div className='bg-slate-800 rounded-2xl p-4 col-span-2'>
               <p className='text-3xl font-black text-purple-400'>
                 {expenses.reduce((a, b) => a + b.amount, 0).toLocaleString()}
               </p>
@@ -208,6 +332,24 @@ const AdminView: React.FC<Props> = ({
                   <p className='font-bold'>일정 초기화</p>
                   <p className='text-xs text-slate-500'>
                     {itinerary.length}건 삭제
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            <button
+              onClick={handleClearMessages}
+              disabled={messages.length === 0}
+              className='w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:hover:bg-slate-800 p-4 rounded-2xl flex items-center justify-between transition-colors'
+            >
+              <div className='flex items-center gap-3'>
+                <div className='w-10 h-10 bg-green-500/20 text-green-400 rounded-xl flex items-center justify-center'>
+                  <MessageSquare size={18} />
+                </div>
+                <div className='text-left'>
+                  <p className='font-bold'>채팅 메시지 초기화</p>
+                  <p className='text-xs text-slate-500'>
+                    {messages.length}건 삭제
                   </p>
                 </div>
               </div>

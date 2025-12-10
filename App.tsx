@@ -6,6 +6,7 @@ import {
   Loader2,
   Map,
   MessageCircle,
+  MessageSquare,
   Share2,
   Sunrise,
   Users,
@@ -15,21 +16,24 @@ import {
 import React, { useCallback, useEffect, useState } from 'react';
 import AdminView from './components/AdminView';
 import AIPlanner from './components/AIPlanner';
+import ChatRoom from './components/ChatRoom';
 import ExpenseView from './components/ExpenseView';
 import ItineraryView from './components/ItineraryView';
+import ProfileSetup from './components/ProfileSetup';
 import SunriseView from './components/SunriseView';
 import {
   checkSupabaseHealth,
   createTrip,
   fetchTrip,
+  getSupabaseClient,
   initSupabase,
   saveTrip,
 } from './services/supabaseService';
-import { Expense, ItineraryItem, Person, TripData } from './types';
+import { Expense, GroupChatMessage, ItineraryItem, Person, TripData } from './types';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    'itinerary' | 'money' | 'sunrise' | 'ai'
+    'itinerary' | 'money' | 'sunrise' | 'ai' | 'chat'
   >('ai');
 
   // --- Admin Mode ---
@@ -44,7 +48,21 @@ const App: React.FC = () => {
   }, []);
 
   // --- Cloud / Share State ---
-  const [tripId, setTripId] = useState<string | null>(null);
+  const [tripId, setTripId] = useState<string | null>(() => {
+    // 먼저 localStorage에서 기존 trip ID 확인
+    const savedTripId = localStorage.getItem('sokcho_trip_id');
+    if (savedTripId) return savedTripId;
+
+    // localStorage에 없으면 URL 파라미터 확인
+    const params = new URLSearchParams(window.location.search);
+    const urlTripId = params.get('trip');
+    if (urlTripId) {
+      localStorage.setItem('sokcho_trip_id', urlTripId);
+      return urlTripId;
+    }
+
+    return null;
+  });
   const [isDbConnected, setIsDbConnected] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [supabaseUrl, setSupabaseUrl] = useState(
@@ -62,8 +80,23 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
+  // --- Profile Setup State ---
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() =>
+    localStorage.getItem('current_user_id')
+  );
+  const [showProfileSetup, setShowProfileSetup] = useState(false);
+
   // --- Data State ---
   const [people, setPeople] = useState<Person[]>(() => {
+    // 링크로 들어온 경우, 빈 배열로 시작 (Supabase에서 로드할 예정)
+    const params = new URLSearchParams(window.location.search);
+    const hasTrip = params.get('trip');
+
+    if (hasTrip) {
+      return []; // 링크로 들어온 경우 빈 배열
+    }
+
+    // 일반적인 경우 localStorage 사용
     const saved = localStorage.getItem('sokcho_people');
     return saved
       ? JSON.parse(saved)
@@ -74,17 +107,38 @@ const App: React.FC = () => {
   });
 
   const [expenses, setExpenses] = useState<Expense[]>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasTrip = params.get('trip');
+    if (hasTrip) return [];
+
     const saved = localStorage.getItem('sokcho_expenses');
     return saved ? JSON.parse(saved) : [];
   });
 
   const [budget, setBudget] = useState<number>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasTrip = params.get('trip');
+    if (hasTrip) return 0;
+
     const saved = localStorage.getItem('sokcho_budget');
     return saved ? parseInt(saved, 10) : 0;
   });
 
   const [itinerary, setItinerary] = useState<ItineraryItem[]>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasTrip = params.get('trip');
+    if (hasTrip) return [];
+
     const saved = localStorage.getItem('sokcho_itinerary');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [messages, setMessages] = useState<GroupChatMessage[]>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasTrip = params.get('trip');
+    if (hasTrip) return [];
+
+    const saved = localStorage.getItem('sokcho_messages');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -119,18 +173,64 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // 2. Check URL for Trip ID (Join Mode)
+  // 2. Check for profile setup when joining via link
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tid = params.get('trip');
-    if (tid) {
-      setTripId(tid);
-      if (isDbConnected) {
-        loadTripFromCloud(tid);
-      }
-      // 링크로 들어온 사람에게는 모달 안 띄움 - 자동 연결 대기
+    // 링크로 들어온 경우 (tripId가 있고 프로필이 없으면) 프로필 설정 표시
+    if (tripId && !currentUserId) {
+      setShowProfileSetup(true);
     }
-  }, [isDbConnected]);
+  }, [currentUserId, tripId]);
+
+  // Load trip data when tripId and connection are ready
+  useEffect(() => {
+    if (isDbConnected && tripId) {
+      loadTripFromCloud(tripId);
+    }
+  }, [isDbConnected, tripId]);
+
+  // Supabase Realtime 구독 (실시간 동기화)
+  useEffect(() => {
+    if (!isDbConnected || !tripId) return;
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    // Realtime 구독 설정
+    const channel = supabase
+      .channel(`trip-${tripId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'trips',
+          filter: `id=eq.${tripId}`,
+        },
+        (payload: any) => {
+          console.log('Realtime update received:', payload);
+          if (payload.new && payload.new.data) {
+            const data = payload.new.data as TripData;
+            // 다른 사용자의 변경사항만 반영 (자신의 변경은 이미 로컬에 있음)
+            setPeople(data.people);
+            setExpenses(data.expenses);
+            setBudget(data.budget);
+            setItinerary(data.itinerary);
+            setMessages(data.messages || []);
+          }
+        }
+      )
+      .subscribe();
+
+    // Realtime이 작동하지 않을 경우를 대비한 폴링 (10초마다)
+    const pollingInterval = setInterval(() => {
+      loadTripFromCloud(tripId);
+    }, 10000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollingInterval);
+    };
+  }, [isDbConnected, tripId]);
 
   // 3. Load Data from Cloud
   const loadTripFromCloud = async (tid: string) => {
@@ -141,6 +241,7 @@ const App: React.FC = () => {
       setExpenses(data.expenses);
       setBudget(data.budget);
       setItinerary(data.itinerary);
+      setMessages(data.messages || []);
       setLastSynced(new Date());
     }
     setIsSyncing(false);
@@ -153,30 +254,86 @@ const App: React.FC = () => {
     localStorage.setItem('sokcho_expenses', JSON.stringify(expenses));
     localStorage.setItem('sokcho_budget', budget.toString());
     localStorage.setItem('sokcho_itinerary', JSON.stringify(itinerary));
+    localStorage.setItem('sokcho_messages', JSON.stringify(messages));
 
     // Cloud Save (If connected and tripId exists)
     if (isDbConnected && tripId) {
-      const data: TripData = { people, expenses, budget, itinerary };
+      const data: TripData = {
+        people,
+        expenses,
+        budget,
+        itinerary,
+        messages,
+        currentUserId: currentUserId || undefined,
+      };
       const timer = setTimeout(() => {
         saveTrip(tripId, data).then(() => setLastSynced(new Date()));
       }, 1000); // 1s debounce
       return () => clearTimeout(timer);
     }
-  }, [people, expenses, budget, itinerary, isDbConnected, tripId]);
+  }, [people, expenses, budget, itinerary, messages, isDbConnected, tripId, currentUserId]);
 
   const handleCreateTrip = async () => {
     if (!isDbConnected) return;
+
+    // 이미 tripId가 있으면 재사용 (새로 생성하지 않음)
+    if (tripId) {
+      setShowShareModal(false);
+      return;
+    }
+
     setIsSyncing(true);
-    const data: TripData = { people, expenses, budget, itinerary };
+    const data: TripData = {
+      people,
+      expenses,
+      budget,
+      itinerary,
+      messages,
+      currentUserId: currentUserId || undefined,
+    };
     const newId = await createTrip(data);
     setIsSyncing(false);
     if (!newId) return;
+
+    // 새로운 trip ID를 localStorage에 저장
+    localStorage.setItem('sokcho_trip_id', newId);
     setTripId(newId);
     setLastSynced(new Date());
 
     // Update URL without reload
     const newUrl = `${window.location.pathname}?trip=${newId}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
+  };
+
+  const handleProfileSetupComplete = (name: string, profilePic: string) => {
+    const newUserId = Date.now().toString();
+    const newPerson: Person = {
+      id: newUserId,
+      name,
+      profilePic,
+      joinedAt: new Date().toISOString(),
+    };
+
+    // Add to people list
+    setPeople((prev: Person[]) => [...prev, newPerson]);
+
+    // Save current user ID
+    setCurrentUserId(newUserId);
+    localStorage.setItem('current_user_id', newUserId);
+
+    // Add system message
+    const systemMessage: GroupChatMessage = {
+      id: Date.now().toString(),
+      userId: 'system',
+      userName: '시스템',
+      text: `${name}님이 여행방에 참여했습니다 🎉`,
+      timestamp: new Date().toISOString(),
+      type: 'system',
+    };
+    setMessages((prev: GroupChatMessage[]) => [...prev, systemMessage]);
+
+    // Close modal
+    setShowProfileSetup(false);
   };
 
   const handleSaveSupabaseConfig = async () => {
@@ -216,6 +373,22 @@ const App: React.FC = () => {
     window.history.pushState({}, '', '/');
   };
 
+  const handleSendMessage = (text: string) => {
+    if (!currentUserId) return;
+
+    const person = people.find((p: Person) => p.id === currentUserId);
+    const newMessage: GroupChatMessage = {
+      id: Date.now().toString(),
+      userId: currentUserId,
+      userName: person?.name || '익명',
+      text,
+      timestamp: new Date().toISOString(),
+      type: 'text',
+    };
+
+    setMessages((prev: GroupChatMessage[]) => [...prev, newMessage]);
+  };
+
   // ===== ADMIN PAGE =====
   if (isAdminMode) {
     return (
@@ -224,10 +397,12 @@ const App: React.FC = () => {
         expenses={expenses}
         itinerary={itinerary}
         budget={budget}
+        messages={messages}
         onSetPeople={setPeople}
         onSetExpenses={setExpenses}
         onSetItinerary={setItinerary}
         onSetBudget={setBudget}
+        onSetMessages={setMessages}
         onExit={exitAdminMode}
       />
     );
@@ -285,6 +460,32 @@ const App: React.FC = () => {
               onReorder={handleReorderItinerary}
             />
           </div>
+        ) : activeTab === 'chat' ? (
+          <div className='w-full h-full'>
+            {currentUserId ? (
+              <ChatRoom
+                currentUserId={currentUserId}
+                people={people}
+                messages={messages}
+                onSendMessage={handleSendMessage}
+              />
+            ) : (
+              <div className='flex flex-col items-center justify-center h-full text-center px-5'>
+                <div className='w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-3'>
+                  <MessageSquare size={32} className='text-slate-400' />
+                </div>
+                <p className='text-slate-500 text-sm font-medium'>
+                  채팅을 사용하려면 프로필을 설정하세요
+                </p>
+                <button
+                  onClick={() => setShowProfileSetup(true)}
+                  className='mt-4 bg-blue-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg active:scale-95 transition-transform'
+                >
+                  프로필 설정하기
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className='w-full h-full overflow-y-auto no-scrollbar'>
             {activeTab === 'money' && (
@@ -338,6 +539,21 @@ const App: React.FC = () => {
             strokeWidth={activeTab === 'ai' ? 2.5 : 2}
           />
           <span className='text-[10px] font-bold mt-1'>비서</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('chat')}
+          className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all duration-300 ${
+            activeTab === 'chat'
+              ? 'text-green-600 bg-green-50 scale-105'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <MessageSquare
+            size={20}
+            fill={activeTab === 'chat' ? 'currentColor' : 'none'}
+            strokeWidth={activeTab === 'chat' ? 2.5 : 2}
+          />
+          <span className='text-[10px] font-bold mt-1'>채팅</span>
         </button>
         <button
           onClick={() => setActiveTab('itinerary')}
@@ -511,6 +727,11 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* --- PROFILE SETUP MODAL --- */}
+      {showProfileSetup && (
+        <ProfileSetup onComplete={handleProfileSetupComplete} />
       )}
     </div>
   );

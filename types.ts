@@ -12,6 +12,8 @@ export interface ItineraryItem {
 export interface Person {
   id: string;
   name: string;
+  profilePic?: string; // 프로필 사진 URL (선택)
+  joinedAt?: string; // 참여 날짜
 }
 
 export interface Expense {
@@ -38,6 +40,15 @@ export interface ChatMessage {
   mapLinks?: { uri: string; title: string }[];
 }
 
+export interface GroupChatMessage {
+  id: string;
+  userId: string; // 'ai' for AI messages
+  userName: string;
+  text: string;
+  timestamp: string;
+  type: 'text' | 'system' | 'expense' | 'itinerary'; // 메시지 타입
+}
+
 export interface PlaceSearchResult {
   name: string;
   address: string;
@@ -52,4 +63,6 @@ export interface TripData {
   expenses: Expense[];
   people: Person[];
   budget: number;
+  messages?: GroupChatMessage[]; // 그룹 채팅 메시지
+  currentUserId?: string; // 현재 사용자 ID
 }

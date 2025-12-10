@@ -384,12 +384,15 @@ const ExpenseView: React.FC<Props> = ({ people, expenses, onAddPerson, onAddExpe
                                   <button
                                     key={p.id}
                                     onClick={() => setNewExpensePayer(p.id)}
-                                    className={`px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${
-                                        newExpensePayer === p.id 
-                                        ? 'bg-slate-900 text-white shadow-md shadow-slate-400' 
+                                    className={`px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
+                                        newExpensePayer === p.id
+                                        ? 'bg-slate-900 text-white shadow-md shadow-slate-400'
                                         : 'bg-slate-100 text-slate-500'
                                     }`}
                                   >
+                                      {p.profilePic && (
+                                        <span className="text-lg">{p.profilePic}</span>
+                                      )}
                                       {p.name}
                                   </button>
                               ))}
