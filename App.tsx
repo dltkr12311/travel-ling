@@ -4,8 +4,8 @@ import ExpenseView from './components/ExpenseView';
 import SunriseView from './components/SunriseView';
 import AIPlanner from './components/AIPlanner';
 import { ItineraryItem, Person, Expense, TripData } from './types';
-import { initSupabase, fetchTrip, saveTrip, subscribeToTrip, getSupabase } from './services/supabaseService';
-import { Map, Wallet, Sunrise, Sparkles, Share2, Users, Cloud, Settings, Check, AlertCircle, Link as LinkIcon, X, Database } from 'lucide-react';
+import { initApi, fetchTrip, saveTrip, createTrip, checkHealth } from './services/apiService';
+import { Map, Wallet, Sunrise, Sparkles, Share2, Users, Cloud, Check, AlertCircle, Link as LinkIcon, X, Database, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'itinerary' | 'money' | 'sunrise' | 'ai'>('itinerary');
@@ -14,8 +14,10 @@ const App: React.FC = () => {
   const [tripId, setTripId] = useState<string | null>(null);
   const [isDbConnected, setIsDbConnected] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [dbUrl, setDbUrl] = useState(localStorage.getItem('sb_url') || process.env.SUPABASE_URL || '');
-  const [dbKey, setDbKey] = useState(localStorage.getItem('sb_key') || process.env.SUPABASE_KEY || '');
+  const [dbUrl, setDbUrl] = useState(localStorage.getItem('api_url') || (import.meta as any).env?.VITE_API_URL || '');
+  const [dbKey, setDbKey] = useState(localStorage.getItem('api_key') || '');
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
@@ -74,13 +76,34 @@ const App: React.FC = () => {
     ];
   });
 
-  // 1. Initialize DB Connection
-  useEffect(() => {
-    if (dbUrl && dbKey) {
-      const success = initSupabase(dbUrl, dbKey);
-      setIsDbConnected(success);
+  const verifyConnection = useCallback(async () => {
+    if (!dbUrl) {
+      setIsDbConnected(false);
+      setConnectionError(null);
+      return false;
     }
-  }, [dbUrl, dbKey]);
+
+    setIsCheckingConnection(true);
+    const healthy = await checkHealth(dbUrl, dbKey);
+    setIsCheckingConnection(false);
+
+    if (!healthy) {
+      setIsDbConnected(false);
+      setConnectionError('서버 연결에 실패했습니다. URL과 서버 상태를 확인하세요.');
+      return false;
+    }
+
+    initApi(dbUrl, dbKey);
+    setIsDbConnected(true);
+    setConnectionError(null);
+    return true;
+  }, [dbKey, dbUrl]);
+
+  useEffect(() => {
+    if (dbUrl) {
+      verifyConnection();
+    }
+  }, []);
 
   // 2. Check URL for Trip ID (Join Mode)
   useEffect(() => {
@@ -108,18 +131,6 @@ const App: React.FC = () => {
       setLastSynced(new Date());
     }
     setIsSyncing(false);
-
-    // Subscribe to changes
-    const unsubscribe = subscribeToTrip(tid, (newData) => {
-      console.log("Realtime update received!", newData);
-      setPeople(newData.people);
-      setExpenses(newData.expenses);
-      setBudget(newData.budget);
-      setItinerary(newData.itinerary);
-      setLastSynced(new Date());
-    });
-
-    return () => unsubscribe();
   };
 
   // 4. Auto-Save to Cloud (Debounced) & LocalStorage
@@ -142,25 +153,24 @@ const App: React.FC = () => {
 
   const handleCreateTrip = async () => {
     if (!isDbConnected) return;
-    const newId = Math.random().toString(36).substring(2, 10);
-    setTripId(newId);
     setIsSyncing(true);
     const data: TripData = { people, expenses, budget, itinerary };
-    await saveTrip(newId, data);
-    setLastSynced(new Date());
+    const newId = await createTrip(data);
     setIsSyncing(false);
+    if (!newId) return;
+    setTripId(newId);
+    setLastSynced(new Date());
     
     // Update URL without reload
     const newUrl = `${window.location.pathname}?trip=${newId}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
   };
 
-  const handleSaveDbConfig = () => {
-    localStorage.setItem('sb_url', dbUrl);
-    localStorage.setItem('sb_key', dbKey);
-    const success = initSupabase(dbUrl, dbKey);
-    setIsDbConnected(success);
-    if (success && tripId) {
+  const handleSaveDbConfig = async () => {
+    localStorage.setItem('api_url', dbUrl);
+    localStorage.setItem('api_key', dbKey);
+    const healthy = await verifyConnection();
+    if (healthy && tripId) {
         loadTripFromCloud(tripId);
     }
   };
@@ -298,36 +308,37 @@ const App: React.FC = () => {
                   {!isDbConnected && (
                       <div className="space-y-4">
                           <div className="bg-slate-50 p-4 rounded-2xl text-xs text-slate-500 space-y-2 border border-slate-100">
-                              <p className="font-bold text-slate-700 mb-1 flex items-center gap-1"><AlertCircle size={12}/> Supabase 설정 필요</p>
-                              <p>친구와 공유하려면 <a href="https://supabase.com" target="_blank" className="text-blue-600 underline">Supabase</a> 프로젝트가 필요합니다. SQL Editor에서 아래 쿼리를 실행해주세요.</p>
-                              <code className="block bg-slate-800 text-slate-300 p-2 rounded-lg mt-2 font-mono select-all">
-                                  create table trips ( id text primary key, data jsonb );
-                              </code>
+                              <p className="font-bold text-slate-700 mb-1 flex items-center gap-1"><AlertCircle size={12}/> 백엔드 설정 필요</p>
+                              <p>PostgreSQL이 연결된 NestJS API 서버를 실행하고, 아래에 서버 주소를 입력하세요. 서버가 자동으로 <code className="font-mono">trips</code> 테이블을 관리합니다.</p>
                           </div>
                           <div className="space-y-3">
-                              <input 
-                                  placeholder="Supabase Project URL" 
+                              <input
+                                  placeholder="API 서버 URL (예: http://localhost:3000)"
                                   className="w-full bg-slate-100 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500"
                                   value={dbUrl}
                                   onChange={e => setDbUrl(e.target.value)}
                               />
-                              <input 
+                              <input
                                   type="password"
-                                  placeholder="Supabase Anon Key" 
+                                  placeholder="API Key (선택)"
                                   className="w-full bg-slate-100 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500"
                                   value={dbKey}
                                   onChange={e => setDbKey(e.target.value)}
                               />
                           </div>
-                          <button 
+                          <button
                             onClick={handleSaveDbConfig}
-                            disabled={!dbUrl || !dbKey}
-                            className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl shadow-lg disabled:opacity-50 mt-2"
-                          >
-                              연동 시작하기
-                          </button>
-                      </div>
-                  )}
+                              disabled={!dbUrl || isCheckingConnection}
+                              className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl shadow-lg disabled:opacity-50 mt-2 flex items-center justify-center gap-2"
+                            >
+                                {isCheckingConnection ? <Loader2 size={18} className="animate-spin" /> : null}
+                                {isCheckingConnection ? '연결 확인 중...' : '연동 시작하기'}
+                            </button>
+                            {connectionError && (
+                              <p className="text-red-500 text-xs font-medium text-center">{connectionError}</p>
+                            )}
+                        </div>
+                    )}
 
                   {/* State: Connected, No Trip ID */}
                   {isDbConnected && !tripId && (
