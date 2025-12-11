@@ -111,22 +111,41 @@ const ItineraryView: React.FC<Props> = ({
 
   // 1. Initialize Kakao Map
   useEffect(() => {
-    if (!window.kakao?.maps || !mapContainerRef.current) return;
+    const initMap = () => {
+      if (!window.kakao?.maps || !mapContainerRef.current) return;
 
-    if (!mapInstance.current) {
-      const options = {
-        center: new window.kakao.maps.LatLng(38.207, 128.5918), // 속초
-        level: 7, // 확대 레벨 (숫자가 작을수록 확대)
-      };
+      if (!mapInstance.current) {
+        const options = {
+          center: new window.kakao.maps.LatLng(38.207, 128.5918),
+          level: 7,
+        };
 
-      const map = new window.kakao.maps.Map(mapContainerRef.current, options);
+        const map = new window.kakao.maps.Map(mapContainerRef.current, options);
+        mapInstance.current = map;
 
-      // 지도 컨트롤 제거 (깔끔한 UI)
-      mapInstance.current = map;
+        // 모바일 지도 크기 재조정
+        setTimeout(() => {
+          if (mapInstance.current) {
+            mapInstance.current.relayout();
+          }
+        }, 100);
+      }
+
+      updateMapMarkers();
+    };
+
+    if (window.kakao?.maps) {
+      initMap();
+    } else {
+      const checkSDK = setInterval(() => {
+        if (window.kakao?.maps) {
+          clearInterval(checkSDK);
+          initMap();
+        }
+      }, 100);
+
+      return () => clearInterval(checkSDK);
     }
-
-    // Update Markers
-    updateMapMarkers();
   }, [items]);
 
   // 2. Update Markers Function (Kakao Maps)
@@ -493,7 +512,7 @@ const ItineraryView: React.FC<Props> = ({
   return (
     <div className='flex flex-col h-full relative bg-white overflow-hidden'>
       {/* 1. Map Area (Top Fixed) */}
-      <div className='h-[40%] w-full bg-slate-100 relative z-0 shrink-0'>
+      <div className='h-[40vh] w-full bg-slate-100 relative z-0 shrink-0'>
         <div ref={mapContainerRef} className='w-full h-full' />
         {/* Gradient overlay for better text visibility if we put text on map */}
         <div className='absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-white/20 to-transparent pointer-events-none'></div>

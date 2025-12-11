@@ -559,7 +559,10 @@ const AIPlanner: React.FC<Props> = ({
   const isInitialState = messages.length === 0;
 
   return (
-    <div className='flex flex-col h-[calc(100vh-80px)] pb-20 bg-gradient-to-br from-slate-50 via-blue-50/30 to-orange-50/20'>
+    <div
+      className='flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-slate-50 via-blue-50/30 to-orange-50/20'
+      style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
+    >
       {isInitialState ? (
         /* ===== 초기 화면 (메인 대시보드) ===== */
         <div className='flex-1 overflow-y-auto no-scrollbar'>
@@ -842,7 +845,10 @@ const AIPlanner: React.FC<Props> = ({
       )}
 
       {/* Input Area */}
-      <div className='p-4 pb-safe bg-white/80 backdrop-blur-xl border-t border-slate-100'>
+      <div
+        className='p-4 bg-white/80 backdrop-blur-xl border-t border-slate-100'
+        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+      >
         {/* Quick chips (채팅 중일 때) */}
         {!isInitialState && (
           <div className='flex gap-2 mb-3 overflow-x-auto no-scrollbar pb-1'>
@@ -870,6 +876,12 @@ const AIPlanner: React.FC<Props> = ({
         <div className='relative flex items-center'>
           <input
             type='text'
+            autoComplete='off'
+            autoCorrect='off'
+            autoCapitalize='off'
+            spellCheck='false'
+            data-form-type='other'
+            name='ai-message'
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}

@@ -153,7 +153,7 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
   };
 
   return (
-    <div className='flex flex-col h-full bg-slate-50 pb-[102px]'>
+    <div className='flex flex-col h-full bg-slate-50'>
       {/* Header */}
       <div className='bg-white border-b border-slate-200 px-5 py-3 shrink-0'>
         <div className='flex items-center justify-between'>
@@ -180,7 +180,7 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
       </div>
 
       {/* Messages List */}
-      <div className='flex-1 overflow-y-auto px-5 py-4'>
+      <div className='flex-1 overflow-y-auto px-5 py-4 pb-20'>
         {messages.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full text-center'>
             <div className='w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-3'>
@@ -202,10 +202,24 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
       </div>
 
       {/* Input Area */}
-      <div className='bg-white border-t border-slate-200 px-5 py-3 shrink-0'>
+      <div
+        className='fixed bg-white border-t border-slate-200 px-5 py-2 z-50'
+        style={{
+          bottom: 'calc(5rem + env(safe-area-inset-bottom))',
+          left: 0,
+          right: 0,
+          paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))',
+        }}
+      >
         <div className='flex gap-2'>
           <input
             type='text'
+            autoComplete='off'
+            autoCorrect='off'
+            autoCapitalize='off'
+            spellCheck='false'
+            data-form-type='other'
+            name='chat-message'
             placeholder='메시지를 입력하세요...'
             value={inputText}
             onChange={e => setInputText(e.target.value)}

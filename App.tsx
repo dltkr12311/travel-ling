@@ -1,5 +1,4 @@
 import {
-  Check,
   Cloud,
   Database,
   Link as LinkIcon,
@@ -22,9 +21,9 @@ import ItineraryView from './components/ItineraryView';
 import ProfileSetup from './components/ProfileSetup';
 import {
   checkSupabaseHealth,
-  createTrip,
   fetchTrip,
   findUserProfileByDisplayId,
+  getAllTripProfiles,
   getSupabaseClient,
   getUserProfile,
   initSupabase,
@@ -56,21 +55,10 @@ const App: React.FC = () => {
   }, []);
 
   // --- Cloud / Share State ---
-  const [tripId, setTripId] = useState<string | null>(() => {
-    // 먼저 localStorage에서 기존 trip ID 확인
-    const savedTripId = localStorage.getItem('sokcho_trip_id');
-    if (savedTripId) return savedTripId;
-
-    // localStorage에 없으면 URL 파라미터 확인
-    const params = new URLSearchParams(window.location.search);
-    const urlTripId = params.get('trip');
-    if (urlTripId) {
-      localStorage.setItem('sokcho_trip_id', urlTripId);
-      return urlTripId;
-    }
-
-    return null;
-  });
+  // 모든 사용자가 하나의 tripId를 공유 (디폴트로 고정)
+  const [tripId] = useState<string>(
+    (import.meta as any).env?.VITE_DEFAULT_TRIP_ID || 'sokcho-2025-12'
+  );
   const [isDbConnected, setIsDbConnected] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [supabaseUrl, setSupabaseUrl] = useState(
@@ -216,6 +204,26 @@ const App: React.FC = () => {
   // 2. Check for profile setup when joining via link & restore profile
   useEffect(() => {
     const restoreProfile = async () => {
+      // 0. 먼저 로컬에 프로필이 있는지 확인 (일반 앱처럼 동작)
+      if (currentUserId) {
+        const localProfile = people.find((p: Person) => p.id === currentUserId);
+        if (localProfile && localProfile.name) {
+          // 이미 로컬에 프로필이 있으면 모달 띄우지 않음
+          return;
+        }
+      }
+
+      // tripId가 없는 경우 (로컬 모드): 프로필이 없으면 모달 표시
+      if (!tripId) {
+        if (
+          !currentUserId ||
+          !people.find((p: Person) => p.id === currentUserId)
+        ) {
+          setShowProfileSetup(true);
+        }
+        return;
+      }
+
       // Supabase가 연결되어 있고, tripId가 있으면 프로필 복원 시도
       if (isDbConnected && tripId) {
         try {
@@ -239,10 +247,7 @@ const App: React.FC = () => {
                   },
                 ];
               });
-              console.log(
-                '✅ Profile restored from Supabase (by fingerprint):',
-                profile.name
-              );
+              console.log('✅ Profile restored:', profile.name);
               return;
             }
           }
@@ -276,24 +281,17 @@ const App: React.FC = () => {
                   },
                 ];
               });
-              console.log(
-                '✅ Profile restored from Supabase (by ID):',
-                profileById.name
-              );
+              console.log('✅ Profile restored:', profileById.name);
               return;
             }
           }
 
           // 3. 찾지 못했으면 처음 방문자로 간주하고 프로필 설정 화면 표시
-          console.log('ℹ️ First visit detected - showing profile setup');
-          if (!currentUserId) {
-            // 처음 방문자: 프로필 설정 화면 표시 (아이디는 선택사항으로 입력 가능)
-            setShowProfileSetup(true);
-          }
+          setShowProfileSetup(true);
         } catch (error) {
           console.error('Failed to restore profile:', error);
           // 에러가 나도 처음 방문자로 간주하고 프로필 설정 화면 표시
-          if (tripId && !currentUserId) {
+          if (tripId) {
             setShowProfileSetup(true);
           }
         }
@@ -302,13 +300,6 @@ const App: React.FC = () => {
 
     restoreProfile();
   }, [isDbConnected, tripId, currentUserId]);
-
-  useEffect(() => {
-    // 링크로 들어온 경우 (tripId가 있고 프로필이 없으면) 프로필 설정 표시
-    if (tripId && !currentUserId) {
-      setShowProfileSetup(true);
-    }
-  }, [currentUserId, tripId]);
 
   // Load trip data when tripId and connection are ready
   useEffect(() => {
@@ -319,10 +310,14 @@ const App: React.FC = () => {
 
   // Supabase Realtime 구독 (실시간 동기화)
   useEffect(() => {
-    if (!isDbConnected || !tripId) return;
+    if (!isDbConnected || !tripId) {
+      return;
+    }
 
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) {
+      return;
+    }
 
     // Realtime 구독 설정
     const channel = supabase
@@ -336,7 +331,6 @@ const App: React.FC = () => {
           filter: `id=eq.${tripId}`,
         },
         (payload: any) => {
-          console.log('Realtime update received:', payload);
           if (payload.new && payload.new.data) {
             const data = payload.new.data as TripData;
             // 다른 사용자의 변경사항만 반영 (자신의 변경은 이미 로컬에 있음)
@@ -352,7 +346,9 @@ const App: React.FC = () => {
               // 현재 사용자의 최신 프로필 찾기
               const myProfile = prev.find(p => p.id === currentUserId);
 
-              if (!myProfile) return realPeopleFromServer;
+              if (!myProfile) {
+                return realPeopleFromServer;
+              }
 
               // Supabase 데이터에서 현재 사용자 제외
               const othersFromServer = realPeopleFromServer.filter(
@@ -455,74 +451,71 @@ const App: React.FC = () => {
 
   // 4. Auto-Save to Cloud (Debounced) & LocalStorage
   useEffect(() => {
-    // Local Save
+    // Local Save (항상 실행)
     localStorage.setItem('sokcho_people', JSON.stringify(people));
     localStorage.setItem('sokcho_expenses', JSON.stringify(expenses));
     localStorage.setItem('sokcho_budget', budget.toString());
     localStorage.setItem('sokcho_itinerary', JSON.stringify(itinerary));
     localStorage.setItem('sokcho_messages', JSON.stringify(messages));
+  }, [people, expenses, budget, itinerary, messages]);
 
-    // Cloud Save (If connected and tripId exists)
+  // 5. Auto-Save to Cloud (expenses, budget, itinerary, messages만)
+  // ⚠️ people은 절대 auto-save하지 않음! (profile creation과 realtime에서만 업데이트)
+  useEffect(() => {
     if (isDbConnected && tripId) {
-      // 더미 데이터 필터링 (id가 'p'로 시작하는 것은 제외)
-      const realPeople = people.filter((p: Person) => !p.id.startsWith('p'));
-      const data: TripData = {
-        people: realPeople,
-        expenses,
-        budget,
-        itinerary,
-        messages,
-        currentUserId: currentUserId || undefined,
-      };
-      const timer = setTimeout(() => {
-        saveTrip(tripId, data).then(() => setLastSynced(new Date()));
-      }, 1000); // 1s debounce
+      const timer = setTimeout(async () => {
+        try {
+          // people 배열은 서버에 그대로 두고, 나머지만 업데이트
+          const serverData = await fetchTrip(tripId);
+          const serverPeople = serverData?.people || [];
+
+          // 🛡️ CRITICAL SAFETY CHECK: 서버에 내 프로필이 없으면 복원!
+          let finalPeople = serverPeople;
+          if (currentUserId) {
+            const serverHasMe = serverPeople.find(
+              (p: Person) => p.id === currentUserId
+            );
+            const localMe = people.find((p: Person) => p.id === currentUserId);
+
+            if (!serverHasMe && localMe) {
+              console.warn(
+                '⚠️ Profile missing on server, restoring:',
+                localMe.name
+              );
+              // 서버의 다른 사람들 + 내 프로필 복원
+              const othersFromServer = serverPeople.filter(
+                (p: Person) => p.id !== currentUserId
+              );
+              finalPeople = [...othersFromServer, localMe];
+            }
+          }
+
+          const data: TripData = {
+            people: finalPeople, // ⚠️ 서버 people OR 복원된 people
+            expenses,
+            budget,
+            itinerary,
+            messages,
+            currentUserId: currentUserId || undefined,
+          };
+
+          await saveTrip(tripId, data);
+          setLastSynced(new Date());
+        } catch (error) {
+          console.error('Auto-save failed:', error);
+        }
+      }, 2000); // 2s debounce
       return () => clearTimeout(timer);
     }
   }, [
-    people,
     expenses,
     budget,
     itinerary,
     messages,
     isDbConnected,
     tripId,
-    currentUserId,
+    // ⚠️ currentUserId 제거: 프로필 등록 시 auto-save가 트리거되면 race condition 발생!
   ]);
-
-  const handleCreateTrip = async () => {
-    if (!isDbConnected) return;
-
-    // 이미 tripId가 있으면 재사용 (새로 생성하지 않음)
-    if (tripId) {
-      setShowShareModal(false);
-      return;
-    }
-
-    setIsSyncing(true);
-    // 더미 데이터 필터링 (id가 'p'로 시작하는 것은 제외)
-    const realPeople = people.filter((p: Person) => !p.id.startsWith('p'));
-    const data: TripData = {
-      people: realPeople,
-      expenses,
-      budget,
-      itinerary,
-      messages,
-      currentUserId: currentUserId || undefined,
-    };
-    const newId = await createTrip(data);
-    setIsSyncing(false);
-    if (!newId) return;
-
-    // 새로운 trip ID를 localStorage에 저장
-    localStorage.setItem('sokcho_trip_id', newId);
-    setTripId(newId);
-    setLastSynced(new Date());
-
-    // Update URL without reload
-    const newUrl = `${window.location.pathname}?trip=${newId}`;
-    window.history.pushState({ path: newUrl }, '', newUrl);
-  };
 
   const handleProfileSetupComplete = async (
     nickname: string,
@@ -575,20 +568,40 @@ const App: React.FC = () => {
     // Save to Supabase if connected
     if (isDbConnected && tripId) {
       try {
+        // 1. user_profiles 테이블에 프로필 저장
         const { saveUserProfile } = await import('./services/supabaseService');
-        // 닉네임을 name과 displayId 둘 다로 사용
-        const saved = await saveUserProfile(
+        await saveUserProfile(
           tripId,
           newUserId,
           nickname,
           profilePic,
           nickname // displayId도 닉네임으로 저장
         );
-        if (saved) {
-          console.log('✅ Profile saved to Supabase with nickname:', nickname);
-        }
+
+        // 2. ✅ user_profiles에서 전체 프로필 조회 (Source of Truth!)
+        const allProfiles = await getAllTripProfiles(tripId);
+
+        // user_profiles 데이터를 Person 형식으로 변환
+        const allPeople: Person[] = allProfiles.map(profile => ({
+          id: profile.userId,
+          name: profile.name,
+          profilePic: profile.profilePic,
+        }));
+
+        // trips 테이블은 people 제외하고 저장 (또는 캐시로만 사용)
+        const serverData = await fetchTrip(tripId);
+        const data: TripData = {
+          people: allPeople, // user_profiles에서 가져온 전체 리스트
+          expenses: serverData?.expenses || expenses,
+          budget: serverData?.budget || budget,
+          itinerary: serverData?.itinerary || itinerary,
+          messages: serverData?.messages || messages,
+          currentUserId: newUserId,
+        };
+
+        await saveTrip(tripId, data);
       } catch (error) {
-        console.error('Failed to save profile to Supabase:', error);
+        console.error('Failed to save profile:', error);
         // Continue anyway - localStorage에 저장되어 있음
       }
     }
@@ -762,7 +775,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className='flex-1 relative flex flex-col overflow-hidden'>
+      <main className='flex-1 relative flex flex-col overflow-hidden pb-nav-safe'>
         {activeTab === 'itinerary' ? (
           <div className='w-full h-full bg-slate-50'>
             <ItineraryView
@@ -844,7 +857,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Bottom Navigation */}
-      <nav className='absolute bottom-nav-safe left-4 right-4 bg-white/90 backdrop-blur-xl rounded-3xl px-2 py-2 z-40 shadow-2xl border border-white/50 flex justify-around items-center'>
+      <nav className='fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl px-4 py-2 z-40 shadow-2xl border-t border-white/50 flex justify-around items-center pb-safe'>
         {/* 비서 탭 - 첫 번째 (메인) */}
         <button
           onClick={() => setActiveTab('ai')}
@@ -921,16 +934,12 @@ const App: React.FC = () => {
                 {isDbConnected ? <Cloud size={32} /> : <Database size={32} />}
               </div>
               <h2 className='text-xl font-black text-slate-900'>
-                {isDbConnected
-                  ? tripId
-                    ? '친구 초대하기'
-                    : '여행 공유하기'
-                  : '클라우드 연결'}
+                {isDbConnected ? '친구 초대하기' : '클라우드 연결'}
               </h2>
               <p className='text-slate-500 text-sm mt-1'>
                 {isDbConnected
-                  ? '친구들과 실시간으로 일정을 함께 수정하세요.'
-                  : '공유 기능을 사용하려면 Supabase 연결이 필요해요.'}
+                  ? '아래 링크를 복사해서 친구들에게 공유하세요.'
+                  : '친구 초대 기능을 사용하려면 Supabase 연결이 필요해요.'}
               </p>
             </div>
 
@@ -986,24 +995,8 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* State: Connected, No Trip ID */}
-            {isDbConnected && !tripId && (
-              <div className='space-y-4'>
-                <div className='bg-emerald-50 text-emerald-700 p-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2'>
-                  <Check size={16} /> Supabase 연결 성공!
-                </div>
-                <button
-                  onClick={handleCreateTrip}
-                  className='w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-transform flex items-center justify-center gap-2'
-                >
-                  <Share2 size={20} />
-                  공유 링크 만들기
-                </button>
-              </div>
-            )}
-
-            {/* State: Connected & Shared */}
-            {isDbConnected && tripId && (
+            {/* State: Connected - 바로 링크 표시 (tripId는 고정값) */}
+            {isDbConnected && (
               <div className='space-y-4'>
                 <div className='bg-slate-100 p-4 rounded-2xl flex items-center gap-3 break-all'>
                   <div className='bg-white p-2 rounded-lg shadow-sm'>

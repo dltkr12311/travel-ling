@@ -58,6 +58,19 @@
     .pb-nav-safe {
       padding-bottom: calc(5rem + env(safe-area-inset-bottom));
     }
+
+    /* Prevent keyboard from pushing content too much */
+    @supports (-webkit-touch-callout: none) {
+
+      /* iOS specific */
+      body {
+        height: -webkit-fill-available;
+      }
+
+      #root {
+        min-height: -webkit-fill-available;
+      }
+    }
   </style>
 </head>
 
