@@ -353,6 +353,17 @@ export const processAIAssistantMessage = async (
       '갈거야',
       '가자',
     ];
+
+    // 지출/예산 관련 키워드 감지 (장소가 아닌 금전 관련 입력)
+    const expenseBudgetKeywords = [
+      '원', '만원', '천원', '억', '만', '천',
+      '썼다', '냈다', '지불', '결제', '돈', '비용',
+      '예산', '총액', '한도', '지출', '사용'
+    ];
+    const isExpenseOrBudget = expenseBudgetKeywords.some(word =>
+      userMessage.includes(word)
+    );
+
     const timePatterns = (
       userMessage.match(/\d+시|오전|오후|아침|점심|저녁/g) || []
     ).length;
@@ -366,14 +377,17 @@ export const processAIAssistantMessage = async (
     const placeLikeWords = (userMessage.match(/[가-힣]{2,}/g) || []).length;
 
     // 여러 일정 언급 가능성 판단 (더 민감하게 개선)
-    // - 쉼표가 하나라도 있으면 무조건 여러 장소 나열로 인식 (최우선)
+    // - 지출/예산 관련이면 여러 장소로 간주하지 않음 (최우선)
+    // - 쉼표가 하나라도 있으면 무조건 여러 장소 나열로 인식
     // - 연결어가 있거나, 시간 표현이 2개 이상, 장소명 같은 단어가 2개 이상
     const hasMultiplePlaces =
-      hasComma || // 쉼표가 있으면 무조건 여러 일정
-      commaCount >= 1 || // 쉼표 개수가 1개 이상이면 여러 일정
-      hasConnection ||
-      timePatterns >= 2 ||
-      placeLikeWords >= 2; // 2개 이상의 장소명 패턴이면 여러 일정으로 간주
+      !isExpenseOrBudget && ( // 지출/예산이 아닐 때만 여러 장소 감지
+        hasComma || // 쉼표가 있으면 무조건 여러 일정
+        commaCount >= 1 || // 쉼표 개수가 1개 이상이면 여러 일정
+        hasConnection ||
+        timePatterns >= 2 ||
+        placeLikeWords >= 2 // 2개 이상의 장소명 패턴이면 여러 일정으로 간주
+      );
 
     const messageWithHint = hasMultiplePlaces
       ? `${systemPrompt}\n\n---\n🚨🚨🚨 [CRITICAL] 여러 장소/일정 감지됨! 반드시 actions 배열 사용 필수!
