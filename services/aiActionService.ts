@@ -153,16 +153,26 @@ export const processAIAssistantMessage = async (
 - 등록된 일정: ${context.itineraryCount || 0}개
 
 ## 핵심 원칙
-1. **여러 일정은 actions 배열로**: 2개 이상 장소 → actions 배열 사용
-2. **긴 문장 자동 파싱**: 쉼표로 구분된 장소들 모두 추출
-3. **시간 없어도 OK**: 장소만 있으면 추가 (시간은 나중에 편집 가능)
-4. **순서 파악**: "들렸다가", "그 다음", "먼저" 등으로 순서 추론
-5. **시간 추론**: "1시 출발 → 4시 도착" 같은 표현 계산
-6. **자동 시간 배분**: "알아서 짜줘" 요청 시 적절한 시간 배정
+1. 🚨 **쉼표 구분 = 각각 별도 일정!**: "A, B" → 반드시 2개 일정! (actions 배열에 A, B 각각 넣기)
+2. **여러 일정은 actions 배열로**: 2개 이상 장소 → actions 배열 사용 (action 필드는 null)
+3. **긴 문장 자동 파싱**: 쉼표로 구분된 장소들 모두 추출
+4. **시간 없어도 OK**: 장소만 있으면 추가 (시간은 나중에 편집 가능)
+5. **순서 파악**: "들렸다가", "그 다음", "먼저" 등으로 순서 추론
+6. **시간 추론**: "1시 출발 → 4시 도착" 같은 표현 계산
+7. **자동 시간 배분**: "알아서 짜줘" 요청 시 적절한 시간 배정
 
 ## 실행 가능한 액션
 
 ### 1. add_itinerary (일정 추가)
+
+🚨🚨🚨 **가장 중요한 규칙 (최우선!)** 🚨🚨🚨
+**쉼표(,)로 구분된 입력은 반드시 각각 별도의 일정으로 인식!**
+- ✅ "속초아이, 영금호" → 2개 일정 (속초아이 하나, 영금호 하나)
+- ✅ "속초아이, 중앙시장, 델피노" → 3개 일정
+- ✅ "A, B, C, D, E" → 5개 일정
+- ❌ "속초아이, 영금호" → 1개 일정만 생성 (절대 안 됨!)
+**→ 쉼표로 나열된 개수만큼 무조건 actions 배열에 넣어야 함!**
+
 **⚠️ 중요: 여러 일정이 언급되면 actions 배열로 모두 반환하세요!**
 
 **🚨 CRITICAL: title 필드 규칙 (절대 준수!):**
@@ -344,7 +354,7 @@ export const processAIAssistantMessage = async (
       '가자',
     ];
     const timePatterns = (
-      userMessage.match(/\d+시|시|오전|오후|아침|점심|저녁/g) || []
+      userMessage.match(/\d+시|오전|오후|아침|점심|저녁/g) || []
     ).length;
     const hasComma = userMessage.includes(',') || userMessage.includes('，');
     // 쉼표가 있으면 무조건 여러 장소 나열로 인식
@@ -352,69 +362,52 @@ export const processAIAssistantMessage = async (
     const hasConnection = connectionWords.some(word =>
       userMessage.includes(word)
     );
-    const wordCount = (userMessage.match(/[가-힣]+/g) || []).filter(
-      word => word.length > 1
-    ).length;
     // 여러 장소명 패턴 (2자 이상의 명사가 여러 개 있는 경우)
     const placeLikeWords = (userMessage.match(/[가-힣]{2,}/g) || []).length;
 
-    // 여러 일정 언급 가능성 판단
+    // 여러 일정 언급 가능성 판단 (더 민감하게 개선)
     // - 쉼표가 하나라도 있으면 무조건 여러 장소 나열로 인식 (최우선)
-    // - 연결어가 있거나, 시간 표현이 2개 이상, 문장이 긴 경우, 장소명 같은 단어가 3개 이상
+    // - 연결어가 있거나, 시간 표현이 2개 이상, 장소명 같은 단어가 2개 이상
     const hasMultiplePlaces =
       hasComma || // 쉼표가 있으면 무조건 여러 일정
+      commaCount >= 1 || // 쉼표 개수가 1개 이상이면 여러 일정
       hasConnection ||
       timePatterns >= 2 ||
-      wordCount > 8 ||
-      placeLikeWords >= 3;
+      placeLikeWords >= 2; // 2개 이상의 장소명 패턴이면 여러 일정으로 간주
 
     const messageWithHint = hasMultiplePlaces
-      ? `${systemPrompt}\n\n---\n🚨🚨🚨 여러 장소/일정 감지! 반드시 actions 배열 사용!
+      ? `${systemPrompt}\n\n---\n🚨🚨🚨 [CRITICAL] 여러 장소/일정 감지됨! 반드시 actions 배열 사용 필수!
 
 사용자: "${userMessage}"
 
-**이 메시지는 여러 장소/일정이 언급되었습니다!**
-- action 단일 객체 사용 금지!
-- 반드시 actions 배열 사용!
-- 쉼표로 구분된 모든 장소명 추출!
+⛔ **절대 금지 사항:**
+- action 단일 객체 절대 사용 금지! (action 필드는 null로!)
+- 하나씩 물어보지 말 것! 모든 장소를 한 번에 actions 배열로!
 
-**올바른 응답 형식:**
+✅ **필수 준수 사항:**
+1. 반드시 actions 배열 사용! (action은 null)
+2. 쉼표로 구분된 모든 장소명을 각각 별도 항목으로!
+3. 각 action에 type과 data 필수! data는 빈 객체 {} 절대 안 됨!
+4. 모든 장소를 한 번에 등록! (하나씩 확인하지 말 것!)
+
+**올바른 응답 형식 (반드시 이 형식!):**
 {
-  "text": "속초아이, 중앙시장 일정 추가했어요!",
+  "text": "속초아이, 중앙시장, 델피노 일정 모두 추가했어요!",
   "action": null,
   "actions": [
     { "type": "add_itinerary", "data": { "title": "속초아이", "time": "09:00" } },
-    { "type": "add_itinerary", "data": { "title": "중앙시장", "time": "11:00" } }
+    { "type": "add_itinerary", "data": { "title": "중앙시장", "time": "11:00" } },
+    { "type": "add_itinerary", "data": { "title": "델피노", "time": "15:00" } }
   ]
 }
 
-🚨 각 action 항목의 필수 구조:
-1. "type" 필드 - 액션 타입 지정
-2. "data" 필드 - **반드시 필수 필드 포함!**
-   ✅ add_itinerary: data.title 필수!
-   ✅ set_budget: data.budget 필수!
-   ✅ add_expense: data.amount, data.description 필수!
-   ✅ add_person: data.personName 필수!
-
-❌ 잘못된 예시 (시스템이 거부!):
-{ "type": "add_itinerary" }  ← data 없음!
-{ "type": "add_itinerary", "data": {} }  ← title 없음!
-{ "type": "add_itinerary", "data": { "time": "15:00" } }  ← title 없음!
-
-✅ 올바른 예시:
-{ "type": "add_itinerary", "data": { "title": "속초 중앙시장" } }
-{ "type": "add_itinerary", "data": { "title": "속초 중앙시장", "time": "15:00" } }
-
-전체 응답 형식:
-{
-  "text": "모든 일정을 추가했어요!",
-  "action": null,
-  "actions": [
-    { "type": "add_itinerary", "data": { "title": "속초아이", "time": "09:00", "itemType": "activity" } },
-    { "type": "add_itinerary", "data": { "title": "속초 중앙시장", "time": "11:00", "itemType": "activity" } },
-    { "type": "add_itinerary", "data": { "title": "델피노 소노캄", "time": "13:00", "itemType": "hotel" } }
-  ]
-}
+🚨 각 action의 필수 구조:
+- type 필드: 액션 타입 지정
+- data 필드: 반드시 필수 필드 포함! (빈 객체 {} 절대 안 됨!)
+  ✅ add_itinerary → data.title 필수!
+  ✅ set_budget → data.budget 필수!
+  ✅ add_expense → data.amount, data.description 필수!
+  ✅ add_person → data.personName 필수!
 
 사용자: "${userMessage}"`
       : `${systemPrompt}\n\n---\n사용자: "${userMessage}"`;
@@ -451,7 +444,8 @@ export const processAIAssistantMessage = async (
                 data: {
                   type: Type.OBJECT,
                   description:
-                    '액션 타입에 따라 필요한 필드가 다름: add_itinerary는 title 필수, set_budget는 budget 필수, add_expense는 amount와 description 필수, add_person은 personName 필수',
+                    '🚨 REQUIRED! 액션이 있으면 data는 필수입니다! 액션 타입에 따라 필요한 필드: add_itinerary는 title 필수, set_budget는 budget 필수, add_expense는 amount+description 필수, add_person은 personName 필수',
+                  nullable: false,
                   properties: {
                     time: { type: Type.STRING, nullable: true },
                     title: {
@@ -469,34 +463,35 @@ export const processAIAssistantMessage = async (
                     notes: { type: Type.STRING, nullable: true },
                     amount: {
                       type: Type.NUMBER,
-                      description: '⚠️ add_expense 타입일 때 반드시 필요함!',
+                      description: '🚨 REQUIRED for add_expense! 금액은 필수입니다!',
                       nullable: true,
                     },
                     description: {
                       type: Type.STRING,
-                      description: '⚠️ add_expense 타입일 때 반드시 필요함!',
+                      description: '🚨 REQUIRED for add_expense! 설명은 필수입니다!',
                       nullable: true,
                     },
                     payerName: { type: Type.STRING, nullable: true },
                     budget: {
                       type: Type.NUMBER,
                       description:
-                        '⚠️ set_budget 타입일 때 반드시 필요함! title 불필요!',
+                        '🚨 REQUIRED for set_budget! 예산 금액은 필수입니다! (title 불필요)',
                       nullable: true,
                     },
                     personName: {
                       type: Type.STRING,
-                      description: '⚠️ add_person 타입일 때 반드시 필요함!',
+                      description: '🚨 REQUIRED for add_person! 멤버 이름은 필수입니다!',
                       nullable: true,
                     },
                   },
                 },
               },
+              required: ['type', 'data'],
             },
             actions: {
               type: Type.ARRAY,
               description:
-                '2개 이상의 일정이 언급되면 반드시 이 배열 사용! 각 항목에는 type과 data가 모두 필요함. data 안에 title(장소명)이 반드시 포함되어야 함!',
+                '2개 이상의 일정이 언급되면 반드시 이 배열 사용! 🚨 각 항목에는 type과 data가 모두 필수! data는 비어있으면 안 됩니다!',
               nullable: true,
               items: {
                 type: Type.OBJECT,
@@ -514,7 +509,8 @@ export const processAIAssistantMessage = async (
                   data: {
                     type: Type.OBJECT,
                     description:
-                      '액션 타입에 따라 필요한 필드가 다릅니다: add_itinerary는 title 필수, set_budget는 budget 필수, add_expense는 amount와 description 필수, add_person은 personName 필수',
+                      '🚨 REQUIRED! data는 필수이며 빈 객체 {}는 안 됩니다! 액션 타입별 필수 필드: add_itinerary→title 필수, set_budget→budget 필수, add_expense→amount+description 필수, add_person→personName 필수',
+                    nullable: false,
                     properties: {
                       time: {
                         type: Type.STRING,
@@ -539,13 +535,13 @@ export const processAIAssistantMessage = async (
                       amount: {
                         type: Type.NUMBER,
                         description:
-                          '⚠️ 지출 금액 (원 단위) - add_expense 타입일 때 반드시 필요함!',
+                          '🚨 REQUIRED for add_expense! 금액은 필수입니다!',
                         nullable: true,
                       },
                       description: {
                         type: Type.STRING,
                         description:
-                          '⚠️ 지출 설명 - add_expense 타입일 때 반드시 필요함!',
+                          '🚨 REQUIRED for add_expense! 설명은 필수입니다!',
                         nullable: true,
                       },
                       payerName: {
@@ -556,13 +552,13 @@ export const processAIAssistantMessage = async (
                       budget: {
                         type: Type.NUMBER,
                         description:
-                          '⚠️ 예산 금액 (원 단위) - set_budget 타입일 때 반드시 필요함! title은 필요 없음!',
+                          '🚨 REQUIRED for set_budget! 예산 금액은 필수입니다! (title 불필요)',
                         nullable: true,
                       },
                       personName: {
                         type: Type.STRING,
                         description:
-                          '⚠️ 멤버 이름 - add_person 타입일 때 반드시 필요함!',
+                          '🚨 REQUIRED for add_person! 멤버 이름은 필수입니다!',
                         nullable: true,
                       },
                     },
@@ -607,6 +603,26 @@ export const processAIAssistantMessage = async (
         parsed.action.data = {};
       }
 
+      // 🛡️ 단일 action의 title 필드 정제
+      if (parsed.action?.type === 'add_itinerary' && parsed.action.data?.title) {
+        const originalTitle = parsed.action.data.title;
+        let cleanedTitle = originalTitle
+          .replace(/_/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (cleanedTitle.length > 50) {
+          const words = cleanedTitle.split(/[\s,]/);
+          const first3Words = words.slice(0, 3).join(' ');
+          cleanedTitle = first3Words || cleanedTitle.substring(0, 50);
+          console.warn(
+            `⚠️ Single action title too long, shortened: "${originalTitle}" → "${cleanedTitle}"`
+          );
+        }
+
+        parsed.action.data.title = cleanedTitle;
+      }
+
       // 🛡️ Fallback: actions 배열의 각 항목에도 동일하게 적용
       if (parsed.actions && Array.isArray(parsed.actions)) {
         parsed.actions.forEach((action: AIAction, index: number) => {
@@ -616,6 +632,27 @@ export const processAIAssistantMessage = async (
               action.type
             );
             action.data = {};
+          }
+
+          // 🛡️ title 필드 정제: 50자 초과 시 자르고, 특수문자 제거
+          if (action.type === 'add_itinerary' && action.data?.title) {
+            const originalTitle = action.data.title;
+            let cleanedTitle = originalTitle
+              .replace(/_/g, ' ')  // 언더스코어 제거
+              .replace(/\s+/g, ' ')  // 연속 공백 제거
+              .trim();
+
+            // 50자 초과 시 앞 3단어까지 추출 (장소명일 가능성이 높음)
+            if (cleanedTitle.length > 50) {
+              const words = cleanedTitle.split(/[\s,]/);
+              const first3Words = words.slice(0, 3).join(' ');
+              cleanedTitle = first3Words || cleanedTitle.substring(0, 50);
+              console.warn(
+                `⚠️ Title too long (${originalTitle.length} chars), shortened: "${originalTitle}" → "${cleanedTitle}"`
+              );
+            }
+
+            action.data.title = cleanedTitle;
           }
         });
       }
@@ -662,6 +699,26 @@ export const processAIAssistantMessage = async (
 
       // 단일 action이 있으면 사용
       if (parsed.action && validateAction(parsed.action)) {
+        // 🚨 검증: 여러 장소가 감지되었는데 단일 action만 생성된 경우 경고
+        if (hasMultiplePlaces) {
+          console.error(
+            '❌ CRITICAL: Multiple places detected but AI returned single action!',
+            {
+              userMessage: userMessage,
+              hasComma: hasComma,
+              commaCount: commaCount,
+              placeLikeWords: placeLikeWords,
+              actionType: parsed.action.type,
+              actionData: parsed.action.data,
+            }
+          );
+
+          // 사용자에게 정직한 피드백 제공
+          return {
+            text: '죄송해요, 여러 장소를 한 번에 등록하는 데 문제가 있었어요. 장소를 하나씩 또는 다시 말씀해주세요! 🙏',
+          };
+        }
+
         console.log('✅ Processing single action:', parsed.action.type);
         return {
           text: parsed.text,
@@ -674,7 +731,7 @@ export const processAIAssistantMessage = async (
         );
       }
 
-      // action/actions 모두 없는데 "등록했다"고 말한 경우 경고
+      // action/actions 모두 없는데 "등록했다"고 말한 경우 검증 강화
       if (
         hasRegistrationText &&
         !parsed.action &&
@@ -683,11 +740,16 @@ export const processAIAssistantMessage = async (
         console.error(
           '❌ CRITICAL: AI said it registered but provided no action!',
           {
-            text: parsed.text,
+            originalText: parsed.text,
             hasAction: !!parsed.action,
             hasActions: !!(parsed.actions && parsed.actions.length > 0),
           }
         );
+
+        // 텍스트를 정직하게 수정하여 사용자에게 명확한 피드백 제공
+        return {
+          text: '죄송해요, 정확히 이해하지 못했어요. 다시 한번 구체적으로 말씀해주세요! 🙏',
+        };
       }
 
       // action/actions 모두 없으면 텍스트만 반환
@@ -708,12 +770,17 @@ export const processAIAssistantMessage = async (
 
 // ===== Helper: Resolve Place Coordinates =====
 export const resolveItineraryPlace = async (
-  placeName: string
+  placeName: string,
+  preferredRegion?: string
 ): Promise<{ lat: number; lng: number; address: string } | null> => {
   try {
+    const regionHint = preferredRegion
+      ? ` ${preferredRegion} 지역을 우선적으로 고려해줘.`
+      : '';
+
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      contents: `"${placeName}"의 위치를 찾아줘. 속초/강릉/양양 지역이면 해당 지역으로, 아니면 정확한 위치로. 한국어 주소와 좌표 반환.`,
+      contents: `"${placeName}"의 정확한 위치를 찾아줘.${regionHint} 한국어 주소와 좌표를 반환해줘.`,
       config: {
         responseMimeType: 'application/json',
         responseSchema: {

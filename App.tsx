@@ -610,25 +610,26 @@ const App: React.FC = () => {
   // 일정 추가 시 즉시 서버에 저장
   const handleAddItinerary = async (item: ItineraryItem) => {
     // ✅ 로컬 상태 먼저 업데이트 (낙관적 업데이트)
-    const updatedItinerary = [...itinerary, item];
-    setItinerary(updatedItinerary);
+    // 함수형 업데이트로 변경하여 여러 일정 동시 추가 지원
+    setItinerary(prev => {
+      const updatedItinerary = [...prev, item];
 
-    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
-    if (isDbConnected && tripId) {
-      try {
-        await saveTrip(tripId, {
+      // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
+      if (isDbConnected && tripId) {
+        saveTrip(tripId, {
           people,
           expenses,
           budget,
           itinerary: updatedItinerary,
           messages,
           currentUserId: currentUserId || undefined,
-        });
-        console.log('✅ Itinerary added and synced to server');
-      } catch (error) {
-        console.error('Failed to sync itinerary addition:', error);
+        })
+          .then(() => console.log('✅ Itinerary added and synced to server'))
+          .catch(error => console.error('Failed to sync itinerary addition:', error));
       }
-    }
+
+      return updatedItinerary;
+    });
   };
 
   // 지출 추가 시 즉시 서버에 저장 (낙관적 업데이트)
