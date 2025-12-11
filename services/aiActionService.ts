@@ -42,6 +42,47 @@ export interface AppContext {
   weatherCondition?: string;
 }
 
+// ===== Helper: Validate Action =====
+const validateAction = (action: AIAction): boolean => {
+  if (!action.type || action.type === 'none' || !action.data) {
+    console.warn('⚠️ Action missing type or data:', action);
+    return false;
+  }
+
+  switch (action.type) {
+    case 'add_itinerary':
+      if (!action.data.title) {
+        console.warn('⚠️ add_itinerary missing title:', action);
+        return false;
+      }
+      return true;
+
+    case 'set_budget':
+      if (typeof action.data.budget !== 'number' || action.data.budget <= 0) {
+        console.warn('⚠️ set_budget missing or invalid budget:', action);
+        return false;
+      }
+      return true;
+
+    case 'add_expense':
+      if (!action.data.amount || !action.data.description) {
+        console.warn('⚠️ add_expense missing required fields:', action);
+        return false;
+      }
+      return true;
+
+    case 'add_person':
+      if (!action.data.personName) {
+        console.warn('⚠️ add_person missing personName:', action);
+        return false;
+      }
+      return true;
+
+    default:
+      return false;
+  }
+};
+
 // ===== Main Function =====
 export const processAIAssistantMessage = async (
   userMessage: string,
@@ -54,7 +95,46 @@ export const processAIAssistantMessage = async (
       .join(', ');
 
     // 더 스마트한 프롬프트
-    const systemPrompt = `너는 속초 여행 앱의 AI 비서야. 사용자의 **자연스러운 한국어 표현**을 이해하고 앱 기능을 실행해.
+    const systemPrompt = `너는 속초 여행 앱의 AI 비서야. 사용자의 한국어 표현을 이해하고 JSON 형식으로 응답해.
+
+## 🚨🚨🚨 CRITICAL: JSON 형식 규칙 (이것만큼은 절대 지켜!)
+
+**모든 action/actions는 반드시 이 형식을 따라야 함:**
+
+✅ **올바른 형식 (반드시 이렇게!):**
+{
+  "type": "add_itinerary",
+  "data": { "title": "속초 중앙시장", "time": "15:00" }
+}
+
+❌ **절대 안 되는 형식 (시스템이 거부함!):**
+{ "type": "add_itinerary" }  ← data 없음!
+{ "type": "add_itinerary", "data": {} }  ← title 없음!
+{ "type": "add_itinerary", "data": { "time": "15:00" } }  ← title 없음!
+
+**핵심 규칙:**
+1. type과 data는 **항상 함께** 있어야 함
+2. data는 **절대 빈 객체 {}면 안 됨** - 필수 필드 반드시 포함!
+3. 액션 타입별 필수 필드:
+   - add_itinerary → data.title 필수!
+   - set_budget → data.budget 필수! (title 불필요)
+   - add_expense → data.amount, data.description 필수!
+   - add_person → data.personName 필수!
+
+**더 많은 올바른 예시:**
+- 일정: { "type": "add_itinerary", "data": { "title": "속초아이" } }
+- 일정(시간 포함): { "type": "add_itinerary", "data": { "title": "중앙시장", "time": "14:00" } }
+- 예산: { "type": "set_budget", "data": { "budget": 300000 } }
+- 지출: { "type": "add_expense", "data": { "amount": 15000, "description": "점심" } }
+- 멤버: { "type": "add_person", "data": { "personName": "철수" } }
+
+**잘못된 예시 (시스템이 거부!):**
+- { "type": "add_itinerary" } ← data 없음!
+- { "type": "add_itinerary", "data": {} } ← title 없음!
+- { "type": "set_budget", "data": { "title": "예산" } } ← budget 없음!
+- { "type": "add_expense", "data": { "amount": 5000 } } ← description 없음!
+
+---
 
 ## 여행 정보
 - 여행지: 속초, 강원도 (2025년 12월 12-13일)
@@ -72,23 +152,13 @@ export const processAIAssistantMessage = async (
 - 총 지출: ${context.totalSpent?.toLocaleString() || 0}원
 - 등록된 일정: ${context.itineraryCount || 0}개
 
-## ⚠️⚠️⚠️ 핵심 원칙 (절대 필수!)
-1. **여러 일정은 반드시 actions 배열로 반환**: 문장에 2개 이상의 장소가 언급되면 **action 대신 actions 배열을 사용해야 함**
-2. **긴 문장 자동 파싱**: "1시에 서울 출발, 4시 속초아이, 중앙시장, 델피노"처럼 여러 장소가 언급되면 **모두 추출해서 actions 배열로 반환**
-3. **시간이 없어도 일정 추가**: 시간 없이도 장소만 있으면 추가 (나중에 편집 가능). 시간은 null 또는 추론 가능한 시간으로 설정
-4. **순서와 맥락 파악**: "들렸다가", "그 다음에", "먼저", "나중에", "그리고" 등의 표현으로 순서 추론
-5. **스마트한 시간 추론**: "1시에 출발하면 4시쯤 도착" 같은 표현에서 시간 계산. 이전 일정 시간 + 이동시간으로 자동 계산
-6. **"알아서 짜줘", "대략 알아서" 처리**: 여러 장소가 언급되면 적절한 시간 배분해서 일정 생성. 첫 일정은 09:00 또는 언급된 시간부터 시작
-7. **"속초아이, 중앙시장, 델피노 이렇게" 요청**: 장소명만 나열되어도 actions 배열로 모두 반환하고, 시간은 자동으로 배분
-
-## ⚠️⚠️⚠️ 응답 형식 규칙 (절대 필수!)
-- **단일 일정**: action 객체 사용
-- **2개 이상 일정**: 반드시 actions 배열 사용 (action은 null 또는 생략)
-- 여러 장소가 언급되면 질문하지 말고 즉시 actions 배열로 모두 반환
-- **⚠️ 각 action 항목에는 반드시 type과 data 모두 포함!**
-- **⚠️ data 안에 title(장소명)이 반드시 있어야 함!**
-- 올바른 형식: { "type": "add_itinerary", "data": { "title": "속초아이", "time": "09:00" } }
-- 잘못된 형식: { "type": "add_itinerary" }  ← data가 없으면 안됨!
+## 핵심 원칙
+1. **여러 일정은 actions 배열로**: 2개 이상 장소 → actions 배열 사용
+2. **긴 문장 자동 파싱**: 쉼표로 구분된 장소들 모두 추출
+3. **시간 없어도 OK**: 장소만 있으면 추가 (시간은 나중에 편집 가능)
+4. **순서 파악**: "들렸다가", "그 다음", "먼저" 등으로 순서 추론
+5. **시간 추론**: "1시 출발 → 4시 도착" 같은 표현 계산
+6. **자동 시간 배분**: "알아서 짜줘" 요청 시 적절한 시간 배정
 
 ## 실행 가능한 액션
 
@@ -202,9 +272,18 @@ export const processAIAssistantMessage = async (
 **결제자:** 언급 없으면 첫 번째 멤버(${context.people[0]?.name || '나'})로 설정
 
 ### 3. set_budget (예산 설정)
+**⚠️ 중요: 예산 설정은 title이 필요 없고 budget만 필요합니다!**
 **인식 패턴 예시:**
 - "예산 30만원" → budget: 300000
 - "예산 50" → budget: 500000 (만원 단위로 해석)
+- "예산 200만원으로 설정해줘" → budget: 2000000
+- "예산 100만" → budget: 1000000
+
+**응답 형식:**
+{
+  "text": "예산을 300,000원으로 설정했어요! 💰",
+  "action": { "type": "set_budget", "data": { "budget": 300000 } }
+}
 
 ### 4. add_person (멤버 추가)
 **인식 패턴 예시:**
@@ -282,22 +361,41 @@ export const processAIAssistantMessage = async (
       placeLikeWords >= 3;
 
     const messageWithHint = hasMultiplePlaces
-      ? `${systemPrompt}\n\n---\n⚠️⚠️⚠️ 매우 중요! 사용자 메시지에 여러 장소/일정이 언급된 것으로 보입니다!
+      ? `${systemPrompt}\n\n---\n🚨🚨🚨 여러 장소/일정 감지! 반드시 actions 배열 사용!
 
-**특히 쉼표(,)로 구분된 나열이 있으면 모든 장소명을 추출해야 합니다!**
+사용자: "${userMessage}"
 
-사용자가 말한 모든 장소/일정을 문장에서 찾아서 actions 배열로 반환해야 합니다.
-action 단일 객체가 아니라 반드시 actions 배열을 사용하세요!
+**이 메시지는 여러 장소/일정이 언급되었습니다!**
+- action 단일 객체 사용 금지!
+- 반드시 actions 배열 사용!
+- 쉼표로 구분된 모든 장소명 추출!
 
-⚠️⚠️⚠️ 중요: 각 action 항목에는 반드시:
-1. "type": "add_itinerary" 
-2. "data": { "title": "장소명" } ← title(장소명)이 반드시 있어야 함!
+**올바른 응답 형식:**
+{
+  "text": "속초아이, 중앙시장 일정 추가했어요!",
+  "action": null,
+  "actions": [
+    { "type": "add_itinerary", "data": { "title": "속초아이", "time": "09:00" } },
+    { "type": "add_itinerary", "data": { "title": "중앙시장", "time": "11:00" } }
+  ]
+}
 
-잘못된 예시 (이렇게 하면 안됨!):
-{ "type": "add_itinerary" }  ← data가 없음!
+🚨 각 action 항목의 필수 구조:
+1. "type" 필드 - 액션 타입 지정
+2. "data" 필드 - **반드시 필수 필드 포함!**
+   ✅ add_itinerary: data.title 필수!
+   ✅ set_budget: data.budget 필수!
+   ✅ add_expense: data.amount, data.description 필수!
+   ✅ add_person: data.personName 필수!
 
-올바른 예시 (반드시 이렇게!):
-{ "type": "add_itinerary", "data": { "title": "속초아이", "time": "09:00", "itemType": "activity" } }
+❌ 잘못된 예시 (시스템이 거부!):
+{ "type": "add_itinerary" }  ← data 없음!
+{ "type": "add_itinerary", "data": {} }  ← title 없음!
+{ "type": "add_itinerary", "data": { "time": "15:00" } }  ← title 없음!
+
+✅ 올바른 예시:
+{ "type": "add_itinerary", "data": { "title": "속초 중앙시장" } }
+{ "type": "add_itinerary", "data": { "title": "속초 중앙시장", "time": "15:00" } }
 
 전체 응답 형식:
 {
@@ -344,9 +442,16 @@ action 단일 객체가 아니라 반드시 actions 배열을 사용하세요!
                 },
                 data: {
                   type: Type.OBJECT,
+                  description:
+                    '액션 타입에 따라 필요한 필드가 다름: add_itinerary는 title 필수, set_budget는 budget 필수, add_expense는 amount와 description 필수, add_person은 personName 필수',
                   properties: {
                     time: { type: Type.STRING, nullable: true },
-                    title: { type: Type.STRING, nullable: true },
+                    title: {
+                      type: Type.STRING,
+                      description:
+                        '⚠️ add_itinerary 타입일 때 반드시 필요함!',
+                      nullable: true,
+                    },
                     location: { type: Type.STRING, nullable: true },
                     itemType: {
                       type: Type.STRING,
@@ -354,11 +459,28 @@ action 단일 객체가 아니라 반드시 actions 배열을 사용하세요!
                       nullable: true,
                     },
                     notes: { type: Type.STRING, nullable: true },
-                    amount: { type: Type.NUMBER, nullable: true },
-                    description: { type: Type.STRING, nullable: true },
+                    amount: {
+                      type: Type.NUMBER,
+                      description: '⚠️ add_expense 타입일 때 반드시 필요함!',
+                      nullable: true,
+                    },
+                    description: {
+                      type: Type.STRING,
+                      description: '⚠️ add_expense 타입일 때 반드시 필요함!',
+                      nullable: true,
+                    },
                     payerName: { type: Type.STRING, nullable: true },
-                    budget: { type: Type.NUMBER, nullable: true },
-                    personName: { type: Type.STRING, nullable: true },
+                    budget: {
+                      type: Type.NUMBER,
+                      description:
+                        '⚠️ set_budget 타입일 때 반드시 필요함! title 불필요!',
+                      nullable: true,
+                    },
+                    personName: {
+                      type: Type.STRING,
+                      description: '⚠️ add_person 타입일 때 반드시 필요함!',
+                      nullable: true,
+                    },
                   },
                 },
               },
@@ -384,32 +506,58 @@ action 단일 객체가 아니라 반드시 actions 배열을 사용하세요!
                   data: {
                     type: Type.OBJECT,
                     description:
-                      '⚠️ 필수! add_itinerary의 경우 title(장소명)이 반드시 포함되어야 함',
+                      '액션 타입에 따라 필요한 필드가 다릅니다: add_itinerary는 title 필수, set_budget는 budget 필수, add_expense는 amount와 description 필수, add_person은 personName 필수',
                     properties: {
                       time: {
                         type: Type.STRING,
-                        description: '시간 (예: "09:00", "14:30")',
+                        description:
+                          '시간 (예: "09:00", "14:30") - add_itinerary에만 사용',
                         nullable: true,
                       },
                       title: {
                         type: Type.STRING,
                         description:
-                          '⚠️ 필수! 장소명 (예: "속초아이", "중앙시장")',
+                          '⚠️ 장소명 (예: "속초아이", "중앙시장") - add_itinerary에만 사용하며 반드시 필요함!',
+                        nullable: true,
                       },
                       location: { type: Type.STRING, nullable: true },
                       itemType: {
                         type: Type.STRING,
                         enum: ['food', 'activity', 'hotel', 'travel'],
                         nullable: true,
+                        description: 'add_itinerary에만 사용',
                       },
                       notes: { type: Type.STRING, nullable: true },
-                      amount: { type: Type.NUMBER, nullable: true },
-                      description: { type: Type.STRING, nullable: true },
-                      payerName: { type: Type.STRING, nullable: true },
-                      budget: { type: Type.NUMBER, nullable: true },
-                      personName: { type: Type.STRING, nullable: true },
+                      amount: {
+                        type: Type.NUMBER,
+                        description:
+                          '⚠️ 지출 금액 (원 단위) - add_expense 타입일 때 반드시 필요함!',
+                        nullable: true,
+                      },
+                      description: {
+                        type: Type.STRING,
+                        description:
+                          '⚠️ 지출 설명 - add_expense 타입일 때 반드시 필요함!',
+                        nullable: true,
+                      },
+                      payerName: {
+                        type: Type.STRING,
+                        nullable: true,
+                        description: '결제자 이름 - add_expense에 사용 (선택)',
+                      },
+                      budget: {
+                        type: Type.NUMBER,
+                        description:
+                          '⚠️ 예산 금액 (원 단위) - set_budget 타입일 때 반드시 필요함! title은 필요 없음!',
+                        nullable: true,
+                      },
+                      personName: {
+                        type: Type.STRING,
+                        description:
+                          '⚠️ 멤버 이름 - add_person 타입일 때 반드시 필요함!',
+                        nullable: true,
+                      },
                     },
-                    required: ['title'],
                   },
                 },
                 required: ['type', 'data'],
@@ -425,6 +573,28 @@ action 단일 객체가 아니라 반드시 actions 배열을 사용하세요!
       const parsed = JSON.parse(response.text);
 
       console.log('📥 AI Response:', JSON.stringify(parsed, null, 2));
+
+      // 🛡️ Fallback: AI가 data 없이 action을 생성한 경우 빈 객체라도 추가
+      if (parsed.action && !parsed.action.data) {
+        console.warn(
+          '⚠️ AI generated action without data field, adding empty object:',
+          parsed.action.type
+        );
+        parsed.action.data = {};
+      }
+
+      // 🛡️ Fallback: actions 배열의 각 항목에도 동일하게 적용
+      if (parsed.actions && Array.isArray(parsed.actions)) {
+        parsed.actions.forEach((action: AIAction, index: number) => {
+          if (action && !action.data) {
+            console.warn(
+              `⚠️ AI generated action[${index}] without data field, adding empty object:`,
+              action.type
+            );
+            action.data = {};
+          }
+        });
+      }
 
       // Clean up action
       if (parsed.action?.type === 'none' || !parsed.action?.type) {
@@ -443,28 +613,10 @@ action 단일 객체가 아니라 반드시 actions 배열을 사용하세요!
         Array.isArray(parsed.actions) &&
         parsed.actions.length > 0
       ) {
-        // actions 배열에서 유효한 것만 필터링 (data와 필수 필드가 있어야 함)
-        const validActions = parsed.actions.filter((a: AIAction) => {
-          // 기본 조건: type과 data가 있어야 함
-          if (!a.type || a.type === 'none' || !a.data) {
-            console.warn('⚠️ Action missing type or data:', a);
-            return false;
-          }
-          // add_itinerary의 경우 title이 필수
-          if (a.type === 'add_itinerary' && !a.data.title) {
-            console.warn('⚠️ add_itinerary missing title:', a);
-            return false;
-          }
-          // add_expense의 경우 amount와 description이 필수
-          if (
-            a.type === 'add_expense' &&
-            (!a.data.amount || !a.data.description)
-          ) {
-            console.warn('⚠️ add_expense missing required fields:', a);
-            return false;
-          }
-          return true;
-        });
+        // actions 배열에서 유효한 것만 필터링 (통합 검증 함수 사용)
+        const validActions = parsed.actions.filter((a: AIAction) =>
+          validateAction(a)
+        );
 
         console.log(
           `📊 Total actions: ${parsed.actions.length}, Valid actions: ${validActions.length}`
@@ -485,36 +637,17 @@ action 단일 객체가 아니라 반드시 actions 배열을 사용하세요!
       }
 
       // 단일 action이 있으면 사용
-      if (
-        parsed.action &&
-        parsed.action.type &&
-        parsed.action.type !== 'none' &&
-        parsed.action.data
-      ) {
-        // 필수 데이터 검증
-        if (
-          parsed.action.type === 'add_itinerary' &&
-          !parsed.action.data.title
-        ) {
-          console.error(
-            '❌ add_itinerary action missing title:',
-            parsed.action
-          );
-        } else if (
-          parsed.action.type === 'add_expense' &&
-          (!parsed.action.data.amount || !parsed.action.data.description)
-        ) {
-          console.error(
-            '❌ add_expense action missing required fields:',
-            parsed.action
-          );
-        } else {
-          console.log('✅ Processing single action:', parsed.action.type);
-          return {
-            text: parsed.text,
-            action: parsed.action,
-          };
-        }
+      if (parsed.action && validateAction(parsed.action)) {
+        console.log('✅ Processing single action:', parsed.action.type);
+        return {
+          text: parsed.text,
+          action: parsed.action,
+        };
+      } else if (parsed.action && !validateAction(parsed.action)) {
+        console.error(
+          '❌ Invalid action detected, discarding:',
+          parsed.action
+        );
       }
 
       // action/actions 모두 없는데 "등록했다"고 말한 경우 경고

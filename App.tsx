@@ -426,8 +426,9 @@ const App: React.FC = () => {
     localStorage.setItem('sokcho_messages', JSON.stringify(messages));
   }, [people, expenses, budget, itinerary, messages]);
 
-  // 5. Auto-Save to Cloud (expenses, budget, itinerary, messages만)
+  // 5. Auto-Save to Cloud (expenses, budget, itinerary만)
   // ⚠️ people은 절대 auto-save하지 않음! (profile creation과 realtime에서만 업데이트)
+  // ⚠️ messages는 dependency에서 제거! (채팅할 때마다 auto-save 트리거 방지)
   useEffect(() => {
     if (isDbConnected && tripId) {
       const timer = setTimeout(async () => {
@@ -462,7 +463,7 @@ const App: React.FC = () => {
             expenses,
             budget,
             itinerary,
-            messages,
+            messages, // ⚠️ 현재 messages 값은 포함 (dependency에서만 제거)
             currentUserId: currentUserId || undefined,
           };
 
@@ -478,7 +479,7 @@ const App: React.FC = () => {
     expenses,
     budget,
     itinerary,
-    messages,
+    // ⚠️ messages 제거: 채팅할 때마다 auto-save 트리거 방지!
     isDbConnected,
     tripId,
     // ⚠️ currentUserId 제거: 프로필 등록 시 auto-save가 트리거되면 race condition 발생!
@@ -897,7 +898,7 @@ const App: React.FC = () => {
     window.history.pushState({}, '', '/');
   };
 
-  const handleSendMessage = (text: string) => {
+  const handleSendMessage = async (text: string) => {
     if (!currentUserId) return;
 
     const person = people.find((p: Person) => p.id === currentUserId);
@@ -910,7 +911,23 @@ const App: React.FC = () => {
       type: 'text',
     };
 
-    setMessages((prev: GroupChatMessage[]) => [...prev, newMessage]);
+    // ✅ 로컬 상태 업데이트
+    const updatedMessages = [...messages, newMessage];
+    setMessages(updatedMessages);
+
+    // ✅ 메시지 즉시 서버에 저장 (채팅 시 auto-save 트리거 방지)
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        await saveTrip(tripId, {
+          ...serverData,
+          messages: updatedMessages, // 새 메시지 포함
+        });
+        console.log('💬 Message saved to server immediately');
+      } catch (error) {
+        console.error('Failed to save message to server:', error);
+      }
+    }
   };
 
   // 지출 삭제 시 즉시 서버에 저장
