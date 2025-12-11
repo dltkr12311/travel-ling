@@ -1,14 +1,14 @@
 import {
-  AlertTriangle,
-  ArrowLeft,
-  Database,
-  MessageSquare,
-  RefreshCw,
-  Settings,
-  Trash2,
-  UserMinus,
-  UserPlus,
-  Users,
+    AlertTriangle,
+    ArrowLeft,
+    Database,
+    MessageSquare,
+    RefreshCw,
+    Settings,
+    Trash2,
+    UserMinus,
+    UserPlus,
+    Users,
 } from 'lucide-react';
 import React, { useState } from 'react';
 import { Expense, GroupChatMessage, ItineraryItem, Person } from '../types';

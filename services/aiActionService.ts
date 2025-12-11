@@ -58,8 +58,8 @@ export const processAIAssistantMessage = async (
 
 ## 여행 정보
 - 여행지: 속초, 강원도 (2025년 12월 12-13일)
-- 주요 일정: 설악산 울산바위 일출 등반
-- 일출 시간: ${context.sunriseTime || '07:28'} (울산바위 정상)
+- 주요 일정: 청대산 일출 등반
+- 일출 시간: ${context.sunriseTime || '07:28'} (청대산 정상)
 - 날씨: ${context.weatherCondition || '맑음'}
 
 ## 현재 상태
@@ -129,17 +129,17 @@ export const processAIAssistantMessage = async (
       ]
     }
 
-- 입력: "속초아이, 속초 중앙시장, 델피노 소노캄, 영금정, 울산바위, 삼양양떼목장"
+- 입력: "속초아이, 속초 중앙시장, 델피노 소노캄, 영금정, 청대산, 삼양양떼목장"
   → 쉼표로 구분된 모든 장소명을 actions 배열로 6개 모두 반환 (시간은 자동 배분):
     {
-      "text": "속초아이, 속초 중앙시장, 델피노 소노캄, 영금정, 울산바위, 삼양양떼목장 일정을 모두 추가했어요! 📅",
+      "text": "속초아이, 속초 중앙시장, 델피노 소노캄, 영금정, 청대산, 삼양양떼목장 일정을 모두 추가했어요! 📅",
       "action": null,
       "actions": [
         { "type": "add_itinerary", "data": { "time": "09:00", "title": "속초아이", "itemType": "activity" } },
         { "type": "add_itinerary", "data": { "time": "10:30", "title": "속초 중앙시장", "itemType": "activity" } },
         { "type": "add_itinerary", "data": { "time": "12:00", "title": "델피노 소노캄", "itemType": "hotel" } },
         { "type": "add_itinerary", "data": { "time": "14:00", "title": "영금정", "itemType": "activity" } },
-        { "type": "add_itinerary", "data": { "time": "16:00", "title": "울산바위", "itemType": "activity" } },
+        { "type": "add_itinerary", "data": { "time": "16:00", "title": "청대산", "itemType": "activity" } },
         { "type": "add_itinerary", "data": { "time": "18:00", "title": "삼양양떼목장", "itemType": "activity" } }
       ]
     }

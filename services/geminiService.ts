@@ -91,7 +91,7 @@ export const getSokchoWeatherAndSunrise = async (): Promise<WeatherInfo> => {
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents:
-        'Predict the weather for Sokcho, South Korea on the morning of December 13, 2025. Specifically focusing on Seoraksan Ulsanbawi sunrise hike. Include sunrise time, expected temperature at 6AM, and wind chill. Provide hiking advice in Korean. Return ONLY valid JSON.',
+        'Predict the weather for Sokcho, South Korea on the morning of December 13, 2025. Specifically focusing on Cheongdae Mountain (청대산) sunrise hike. Include sunrise time, expected temperature at 6AM, and wind chill. Provide hiking advice in Korean. Return ONLY valid JSON.',
       config: {
         responseMimeType: 'application/json',
         responseSchema: {
@@ -127,7 +127,7 @@ export const getSokchoWeatherAndSunrise = async (): Promise<WeatherInfo> => {
       condition: '구름 조금',
       windSpeed: '5 m/s',
       hikingAdvice:
-        '울산바위 정상은 바람이 매우 강하니 체감 온도는 -8도 이하일 수 있습니다. 아이젠과 방풍 자켓을 꼭 챙기세요.',
+        '청대산 정상은 바람이 강할 수 있으니 체감 온도가 낮을 수 있습니다. 아이젠과 방풍 자켓을 꼭 챙기세요.',
     };
   }
 };
@@ -169,7 +169,7 @@ export const generatePackingList = async (): Promise<string[]> => {
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents:
-        'Generate a checklist of 10 essential items for a winter trip to Sokcho (Dec 12-13) including Ulsanbawi hiking. Return the items in Korean. Return JSON array of strings.',
+        'Generate a checklist of 10 essential items for a winter trip to Sokcho (Dec 12-13) including Cheongdae Mountain (청대산) hiking. Return the items in Korean. Return JSON array of strings.',
       config: {
         responseMimeType: 'application/json',
         responseSchema: {

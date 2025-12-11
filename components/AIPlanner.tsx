@@ -256,7 +256,26 @@ const AIPlanner: React.FC<Props> = ({
   const [lastAction, setLastAction] = useState<AIAction | null>(null);
   const [weatherInfo, setWeatherInfo] = useState<WeatherInfo | null>(null);
   const [isLoadingWeather, setIsLoadingWeather] = useState(true);
+  const [navHeight, setNavHeight] = useState('3.5rem');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 네비게이션 높이 측정
+  useEffect(() => {
+    const updateNavHeight = () => {
+      const nav = document.getElementById('bottom-navigation');
+      if (nav) {
+        const height = nav.offsetHeight;
+        setNavHeight(`${height}px`);
+      }
+    };
+
+    updateNavHeight();
+    window.addEventListener('resize', updateNavHeight);
+    // 초기 렌더링 후에도 다시 측정
+    setTimeout(updateNavHeight, 100);
+
+    return () => window.removeEventListener('resize', updateNavHeight);
+  }, []);
 
   // 일출/날씨 정보 로드
   useEffect(() => {
@@ -558,10 +577,14 @@ const AIPlanner: React.FC<Props> = ({
   // 채팅이 시작되지 않은 초기 상태
   const isInitialState = messages.length === 0;
 
+  // 입력 필드 높이 계산 (대략 4rem + 네비게이션 높이)
+  const inputAreaHeight = 40; // px (입력 필드 + 패딩)
+  const totalBottomSpace = `calc(${inputAreaHeight}px + ${navHeight})`;
+
   return (
     <div
       className='flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-slate-50 via-blue-50/30 to-orange-50/20'
-      style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
+      style={{ paddingBottom: totalBottomSpace }}
     >
       {isInitialState ? (
         /* ===== 초기 화면 (메인 대시보드) ===== */
@@ -846,8 +869,10 @@ const AIPlanner: React.FC<Props> = ({
 
       {/* Input Area */}
       <div
-        className='p-4 bg-white/80 backdrop-blur-xl border-t border-slate-100'
-        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+        className='fixed left-0 right-0 p-4 bg-white/80 backdrop-blur-xl border-t border-slate-100 z-50'
+        style={{
+          bottom: navHeight,
+        }}
       >
         {/* Quick chips (채팅 중일 때) */}
         {!isInitialState && (

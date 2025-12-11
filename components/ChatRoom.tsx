@@ -16,7 +16,26 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
   onSendMessage,
 }) => {
   const [inputText, setInputText] = useState('');
+  const [navHeight, setNavHeight] = useState('3.5rem');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 네비게이션 높이 측정
+  useEffect(() => {
+    const updateNavHeight = () => {
+      const nav = document.getElementById('bottom-navigation');
+      if (nav) {
+        const height = nav.offsetHeight;
+        setNavHeight(`${height}px`);
+      }
+    };
+
+    updateNavHeight();
+    window.addEventListener('resize', updateNavHeight);
+    // 초기 렌더링 후에도 다시 측정
+    setTimeout(updateNavHeight, 100);
+
+    return () => window.removeEventListener('resize', updateNavHeight);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -205,10 +224,9 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
       <div
         className='fixed bg-white border-t border-slate-200 px-5 py-2 z-50'
         style={{
-          bottom: 'calc(5rem + env(safe-area-inset-bottom))',
+          bottom: navHeight,
           left: 0,
           right: 0,
-          paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))',
         }}
       >
         <div className='flex gap-2'>

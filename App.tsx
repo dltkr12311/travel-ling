@@ -667,6 +667,231 @@ const App: React.FC = () => {
     setItinerary(newItems);
   };
 
+  // 일정 추가 시 즉시 서버에 저장
+  const handleAddItinerary = async (item: ItineraryItem) => {
+    let currentItinerary: ItineraryItem[] = [];
+
+    // ✅ 함수형 업데이트로 최신 상태 보장하고 현재 값도 캡처
+    setItinerary((prev: ItineraryItem[]) => {
+      currentItinerary = [...prev, item];
+      return currentItinerary;
+    });
+
+    // Supabase에 즉시 저장 (로컬 최신 상태 사용)
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses: serverData?.expenses || expenses,
+          budget: serverData?.budget || budget,
+          itinerary: currentItinerary, // ✅ 로컬 최신 상태 직접 사용
+          messages: serverData?.messages || messages,
+          currentUserId: currentUserId || undefined,
+        });
+        console.log('✅ Itinerary added and synced to server');
+      } catch (error) {
+        console.error('Failed to sync itinerary addition:', error);
+      }
+    }
+  };
+
+  // 지출 추가 시 즉시 서버에 저장
+  const handleAddExpense = async (expense: Expense) => {
+    let currentExpenses: Expense[] = [];
+
+    // ✅ 함수형 업데이트로 최신 상태 보장하고 현재 값도 캡처
+    setExpenses((prev: Expense[]) => {
+      currentExpenses = [...prev, expense];
+      return currentExpenses;
+    });
+
+    // Supabase에 즉시 저장 (로컬 최신 상태 사용)
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses: currentExpenses, // ✅ 로컬 최신 상태 직접 사용
+          budget: serverData?.budget || budget,
+          itinerary: serverData?.itinerary || itinerary,
+          messages: serverData?.messages || messages,
+          currentUserId: currentUserId || undefined,
+        });
+        console.log('✅ Expense added and synced to server');
+      } catch (error) {
+        console.error('Failed to sync expense addition:', error);
+      }
+    }
+  };
+
+  // 예산 설정 시 즉시 서버에 저장
+  const handleSetBudget = async (amount: number) => {
+    setBudget(amount);
+
+    // Supabase에 즉시 저장 (race condition 방지)
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+        // ✅ 서버의 최신 데이터 사용, 방금 설정한 예산만 교체
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses: serverData?.expenses || expenses,
+          budget: amount,
+          itinerary: serverData?.itinerary || itinerary,
+          messages: serverData?.messages || messages,
+          currentUserId: currentUserId || undefined,
+        });
+        console.log('✅ Budget set and synced to server');
+      } catch (error) {
+        console.error('Failed to sync budget update:', error);
+      }
+    }
+  };
+
+  // 일정 수정 시 즉시 서버에 저장
+  const handleEditItinerary = async (
+    id: string,
+    updates: Partial<ItineraryItem>
+  ) => {
+    // ✅ 함수형 업데이트로 최신 상태 보장
+    setItinerary((prev: ItineraryItem[]) =>
+      prev.map((i) => (i.id === id ? { ...i, ...updates } : i))
+    );
+
+    // Supabase에 즉시 저장
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+
+        // ✅ 서버 데이터와 merge: 수정된 항목을 업데이트
+        const serverItinerary = serverData?.itinerary || [];
+        const mergedItinerary = serverItinerary.map((i: ItineraryItem) =>
+          i.id === id ? { ...i, ...updates } : i
+        );
+        // 서버에 없으면 추가 (방어 코드)
+        if (!serverItinerary.find((i: ItineraryItem) => i.id === id)) {
+          mergedItinerary.push({ ...updates, id } as ItineraryItem);
+        }
+
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses: serverData?.expenses || expenses,
+          budget: serverData?.budget || budget,
+          itinerary: mergedItinerary,
+          messages: serverData?.messages || messages,
+          currentUserId: currentUserId || undefined,
+        });
+        console.log('✅ Itinerary edited and synced to server');
+      } catch (error) {
+        console.error('Failed to sync itinerary edit:', error);
+      }
+    }
+  };
+
+  // 일정 삭제 시 즉시 서버에 저장
+  const handleRemoveItinerary = async (id: string) => {
+    // ✅ 함수형 업데이트로 최신 상태 보장
+    setItinerary((prev: ItineraryItem[]) => prev.filter((i) => i.id !== id));
+
+    // Supabase에 즉시 저장
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+
+        // ✅ 서버 데이터에서 해당 항목 제거
+        const serverItinerary = serverData?.itinerary || [];
+        const mergedItinerary = serverItinerary.filter(
+          (i: ItineraryItem) => i.id !== id
+        );
+
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses: serverData?.expenses || expenses,
+          budget: serverData?.budget || budget,
+          itinerary: mergedItinerary,
+          messages: serverData?.messages || messages,
+          currentUserId: currentUserId || undefined,
+        });
+        console.log('✅ Itinerary deleted and synced to server');
+      } catch (error) {
+        console.error('Failed to sync itinerary deletion:', error);
+      }
+    }
+  };
+
   const exitAdminMode = () => {
     setIsAdminMode(false);
     window.history.pushState({}, '', '/');
@@ -690,8 +915,8 @@ const App: React.FC = () => {
 
   // 지출 삭제 시 즉시 서버에 저장
   const handleRemoveExpense = async (id: string) => {
-    const updatedExpenses = expenses.filter(e => e.id !== id);
-    setExpenses(updatedExpenses);
+    // ✅ 함수형 업데이트로 최신 상태 보장
+    setExpenses((prev: Expense[]) => prev.filter((e) => e.id !== id));
 
     // Supabase에 즉시 저장 (race condition 방지)
     if (isDbConnected && tripId) {
@@ -711,12 +936,17 @@ const App: React.FC = () => {
             finalPeople = [...othersFromServer, localMe];
           }
         }
+
+        // ✅ 서버 데이터에서 해당 항목 제거
+        const serverExpenses = serverData?.expenses || [];
+        const mergedExpenses = serverExpenses.filter((e: Expense) => e.id !== id);
+
         await saveTrip(tripId, {
           people: finalPeople,
-          expenses: updatedExpenses,
-          budget,
-          itinerary,
-          messages,
+          expenses: mergedExpenses,
+          budget: serverData?.budget || budget,
+          itinerary: serverData?.itinerary || itinerary,
+          messages: serverData?.messages || messages,
           currentUserId: currentUserId || undefined,
         });
         console.log('✅ Expense deleted and synced to server');
@@ -992,15 +1222,9 @@ const App: React.FC = () => {
           <div className='w-full h-full bg-slate-50'>
             <ItineraryView
               items={itinerary}
-              onAddItem={item => setItinerary([...itinerary, item])}
-              onEditItem={(id, updates) =>
-                setItinerary(
-                  itinerary.map(i => (i.id === id ? { ...i, ...updates } : i))
-                )
-              }
-              onRemoveItem={id =>
-                setItinerary(itinerary.filter(i => i.id !== id))
-              }
+              onAddItem={handleAddItinerary}
+              onEditItem={handleEditItinerary}
+              onRemoveItem={handleRemoveItinerary}
               onReorder={handleReorderItinerary}
             />
           </div>
@@ -1039,10 +1263,10 @@ const App: React.FC = () => {
                 onAddPerson={name =>
                   setPeople([...people, { id: Date.now().toString(), name }])
                 }
-                onAddExpense={exp => setExpenses([...expenses, exp])}
+                onAddExpense={handleAddExpense}
                 onRemoveExpense={handleRemoveExpense}
                 budget={budget}
-                onSetBudget={setBudget}
+                onSetBudget={handleSetBudget}
               />
             )}
             {activeTab === 'ai' && (
@@ -1051,9 +1275,9 @@ const App: React.FC = () => {
                 budget={budget}
                 expenses={expenses}
                 itineraryCount={itinerary.length}
-                onAddItinerary={item => setItinerary(prev => [...prev, item])}
-                onAddExpense={exp => setExpenses(prev => [...prev, exp])}
-                onSetBudget={setBudget}
+                onAddItinerary={handleAddItinerary}
+                onAddExpense={handleAddExpense}
+                onSetBudget={handleSetBudget}
                 onAddPerson={name =>
                   setPeople(prev => [
                     ...prev,
@@ -1067,7 +1291,10 @@ const App: React.FC = () => {
       </main>
 
       {/* Bottom Navigation */}
-      <nav className='fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl px-4 py-2 z-40 shadow-2xl border-t border-white/50 flex justify-around items-center pb-safe'>
+      <nav
+        id='bottom-navigation'
+        className='fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl px-4 py-2 z-40 shadow-2xl border-t border-white/50 flex justify-around items-center pb-safe'
+      >
         {/* 비서 탭 - 첫 번째 (메인) */}
         <button
           onClick={() => setActiveTab('ai')}
