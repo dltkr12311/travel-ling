@@ -688,6 +688,44 @@ const App: React.FC = () => {
     setMessages((prev: GroupChatMessage[]) => [...prev, newMessage]);
   };
 
+  // 지출 삭제 시 즉시 서버에 저장
+  const handleRemoveExpense = async (id: string) => {
+    const updatedExpenses = expenses.filter(e => e.id !== id);
+    setExpenses(updatedExpenses);
+
+    // Supabase에 즉시 저장 (race condition 방지)
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses: updatedExpenses,
+          budget,
+          itinerary,
+          messages,
+          currentUserId: currentUserId || undefined,
+        });
+        console.log('✅ Expense deleted and synced to server');
+      } catch (error) {
+        console.error('Failed to sync expense deletion:', error);
+      }
+    }
+  };
+
   // Admin 초기화 함수들
   const handleAdminClearExpenses = async () => {
     setExpenses([]);
@@ -1002,9 +1040,7 @@ const App: React.FC = () => {
                   setPeople([...people, { id: Date.now().toString(), name }])
                 }
                 onAddExpense={exp => setExpenses([...expenses, exp])}
-                onRemoveExpense={id =>
-                  setExpenses(expenses.filter(e => e.id !== id))
-                }
+                onRemoveExpense={handleRemoveExpense}
                 budget={budget}
                 onSetBudget={setBudget}
               />
