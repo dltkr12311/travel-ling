@@ -165,9 +165,17 @@ export const processAIAssistantMessage = async (
 ### 1. add_itinerary (일정 추가)
 **⚠️ 중요: 여러 일정이 언급되면 actions 배열로 모두 반환하세요!**
 
+**🚨 CRITICAL: title 필드 규칙 (절대 준수!):**
+- ✅ title은 **오직 장소명만** 포함! (예: "속초아이", "중앙시장", "델피노")
+- ❌ 설명, 메타 정보, 수정 요청, 추가 설명 절대 포함 금지!
+- ❌ "속초아이대관람차_대관람차는 삭제..." ← 절대 안 됨!
+- ✅ "속초아이" ← 이렇게만!
+- ❌ "속초아이 title: 속초아이" ← 중복 설명 금지!
+- ❌ "속초아이로 변경합니다" ← 메타 정보 금지!
+
 **장소 인식 규칙:**
 - 어떤 장소명이든 인식 가능 (속초아이, 중앙시장, 델피노는 예시일 뿐)
-- "XX에 가자", "XX 들렸다", "XX로 이동" 등 어떤 표현이든 장소명 추출
+- "XX에 가자", "XX 들렸다", "XX로 이동" 등 어떤 표현이든 **장소명만** 추출
 - **쉼표로 구분된 나열**: "속초아이, 중앙시장, 델피노"처럼 쉼표로 나열된 모든 장소명 추출
 - 도시명, 관광지명, 식당명, 호텔명 등 모든 장소 인식
 - "출발", "도착", "이동" 같은 표현도 travel 타입 일정으로 인식
@@ -449,7 +457,7 @@ export const processAIAssistantMessage = async (
                     title: {
                       type: Type.STRING,
                       description:
-                        '⚠️ add_itinerary 타입일 때 반드시 필요함!',
+                        '🚨 CRITICAL: 장소명만! (예: "속초아이") - 설명/메타 정보 절대 포함 금지! add_itinerary 타입일 때 반드시 필요함!',
                       nullable: true,
                     },
                     location: { type: Type.STRING, nullable: true },
@@ -517,7 +525,7 @@ export const processAIAssistantMessage = async (
                       title: {
                         type: Type.STRING,
                         description:
-                          '⚠️ 장소명 (예: "속초아이", "중앙시장") - add_itinerary에만 사용하며 반드시 필요함!',
+                          '🚨 CRITICAL: 장소명만! (예: "속초아이", "중앙시장") - 설명, 메타 정보 절대 포함 금지! "속초아이대관람차_..." ← 절대 안 됨! "속초아이" ← 이렇게만!',
                         nullable: true,
                       },
                       location: { type: Type.STRING, nullable: true },
@@ -570,7 +578,23 @@ export const processAIAssistantMessage = async (
     });
 
     if (response.text) {
-      const parsed = JSON.parse(response.text);
+      // 🛡️ JSON 파싱 전 안전성 체크
+      const responseText = response.text.trim();
+
+      // 응답이 너무 긴 경우 경고
+      if (responseText.length > 100000) {
+        console.warn('⚠️ AI response too long:', responseText.length, 'characters');
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ JSON Parse Error:', parseError);
+        console.error('Response preview (first 500 chars):', responseText.substring(0, 500));
+        console.error('Response preview (last 500 chars):', responseText.substring(responseText.length - 500));
+        throw new Error('Invalid JSON response from AI');
+      }
 
       console.log('📥 AI Response:', JSON.stringify(parsed, null, 2));
 

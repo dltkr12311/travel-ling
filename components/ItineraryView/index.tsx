@@ -11,473 +11,36 @@ import {
   Trash2,
   Utensils,
 } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  getCoordsFromAddress,
-  searchPlacesKakao,
-} from '../services/kakaoPlaceService';
-import { ItineraryItem, PlaceSearchResult } from '../types';
-
-interface Props {
-  items: ItineraryItem[];
-  onAddItem: (item: ItineraryItem) => void;
-  onEditItem: (id: string, updates: Partial<ItineraryItem>) => void;
-  onRemoveItem: (id: string) => void;
-  onReorder: (items: ItineraryItem[]) => void;
-}
-
-declare global {
-  interface Window {
-    kakao: any;
-  }
-}
-
-const ItineraryView: React.FC<Props> = ({
-  items,
-  onAddItem,
-  onEditItem,
-  onRemoveItem,
-  onReorder,
-}) => {
-  const [isAdding, setIsAdding] = useState(false);
-  const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
-
-  // Add Item State
-  const [newItem, setNewItem] = useState<Partial<ItineraryItem>>({
-    type: 'activity',
-    time: '12:00',
-  });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<PlaceSearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
-
-  // Drag & Drop
-  const dragItem = useRef<number | null>(null);
-  const dragOverItem = useRef<number | null>(null);
-
-  // Map Refs
-  const mapInstance = useRef<any>(null);
-  const markersRef = useRef<any[]>([]);
-  const polylineRef = useRef<any>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-
-  // List Refs for Intersection Observer
-  const itemRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-
-  // Animation ref
-  const animationRef = useRef<number | null>(null);
-
-  // 부드러운 지도 이동 애니메이션
-  const smoothPanTo = (
-    targetLat: number,
-    targetLng: number,
-    duration = 500
-  ) => {
-    if (!mapInstance.current || !window.kakao?.maps) return;
-
-    // 이전 애니메이션 취소
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-
-    const startCenter = mapInstance.current.getCenter();
-    const startLat = startCenter.getLat();
-    const startLng = startCenter.getLng();
-
-    const startTime = performance.now();
-
-    const animate = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      // easeOutCubic for smooth deceleration
-      const eased = 1 - Math.pow(1 - progress, 3);
-
-      const currentLat = startLat + (targetLat - startLat) * eased;
-      const currentLng = startLng + (targetLng - startLng) * eased;
-
-      const newCenter = new window.kakao.maps.LatLng(currentLat, currentLng);
-      mapInstance.current.setCenter(newCenter);
-
-      if (progress < 1) {
-        animationRef.current = requestAnimationFrame(animate);
-      }
-    };
-
-    animationRef.current = requestAnimationFrame(animate);
-  };
-
-  // 1. Initialize Kakao Map
-  useEffect(() => {
-    const initMap = () => {
-      if (!window.kakao?.maps || !mapContainerRef.current) return;
-
-      if (!mapInstance.current) {
-        const options = {
-          center: new window.kakao.maps.LatLng(38.207, 128.5918),
-          level: 7,
-        };
-
-        const map = new window.kakao.maps.Map(mapContainerRef.current, options);
-        mapInstance.current = map;
-
-        // 모바일 지도 크기 재조정
-        setTimeout(() => {
-          if (mapInstance.current) {
-            mapInstance.current.relayout();
-          }
-        }, 100);
-      }
-
-      updateMapMarkers();
-    };
-
-    if (window.kakao?.maps) {
-      initMap();
-    } else {
-      const checkSDK = setInterval(() => {
-        if (window.kakao?.maps) {
-          clearInterval(checkSDK);
-          initMap();
-        }
-      }, 100);
-
-      return () => clearInterval(checkSDK);
-    }
-  }, [items]);
-
-  // 2. Update Markers Function (Kakao Maps)
-  const updateMapMarkers = () => {
-    if (!mapInstance.current || !window.kakao?.maps) return;
-
-    // Clear existing markers
-    markersRef.current.forEach(m => m.setMap(null));
-    markersRef.current = [];
-    if (polylineRef.current) polylineRef.current.setMap(null);
-
-    const bounds = new window.kakao.maps.LatLngBounds();
-    const linePath: any[] = [];
-
-    items.forEach((item, index) => {
-      if (item.lat && item.lng) {
-        const isActive = activeId === item.id;
-        const position = new window.kakao.maps.LatLng(item.lat, item.lng);
-
-        // 커스텀 마커 이미지 생성
-        const size = isActive ? 32 : 28;
-        const markerContent = document.createElement('div');
-        markerContent.style.cssText = `
-          position: relative;
-          width: ${size}px;
-          height: ${size}px;
-          margin-left: -${size / 2}px;
-          margin-top: -${size / 2}px;
-        `;
-        markerContent.innerHTML = `
-          <div style="
-            width: 100%;
-            height: 100%;
-            background: ${isActive ? '#2563eb' : '#334155'};
-            border: 2px solid white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: ${isActive ? '14px' : '12px'};
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-            cursor: pointer;
-          ">${index + 1}</div>
-        `;
-
-        // CustomOverlay 사용 (yAnchor/xAnchor 제거, margin으로 직접 조절)
-        const customOverlay = new window.kakao.maps.CustomOverlay({
-          position: position,
-          content: markerContent,
-        });
-
-        customOverlay.setMap(mapInstance.current);
-
-        // 클릭 이벤트
-        markerContent.onclick = () => {
-          const el = itemRefs.current[item.id];
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            setActiveId(item.id);
-          }
-        };
-
-        markersRef.current.push(customOverlay);
-        bounds.extend(position);
-        linePath.push(position);
-      }
-    });
-
-    // Draw polyline (경로선)
-    if (linePath.length > 1) {
-      polylineRef.current = new window.kakao.maps.Polyline({
-        path: linePath,
-        strokeWeight: 3,
-        strokeColor: '#94a3b8', // slate-400
-        strokeOpacity: 0.7,
-        strokeStyle: 'shortdash',
-      });
-      polylineRef.current.setMap(mapInstance.current);
-    }
-
-    // Fit bounds (지도 영역 자동 조절)
-    if (linePath.length > 0 && !activeId) {
-      // 전체 경로 보기 (축소)
-      mapInstance.current.setBounds(bounds, 50, 50, 50, 50);
-    } else if (activeId) {
-      // 트리플 스타일: 활성화된 아이템으로 부드럽게 이동
-      const activeItem = items.find(i => i.id === activeId);
-      if (activeItem?.lat && activeItem?.lng) {
-        const currentLevel = mapInstance.current.getLevel();
-
-        // 현재 줌이 멀면 먼저 확대
-        if (currentLevel > 4) {
-          mapInstance.current.setLevel(4, { animate: true });
-        }
-
-        // 부드럽게 애니메이션 이동
-        smoothPanTo(activeItem.lat, activeItem.lng, 400);
-      }
-    }
-  };
-
-  // 3. Re-render markers when activeId changes to update styles
-  useEffect(() => {
-    updateMapMarkers();
-  }, [activeId]);
-
-  // 4. Scroll-based tracking for precise item detection
-  useEffect(() => {
-    const listContainer = document.getElementById('list-container');
-    if (!listContainer) return;
-
-    let ticking = false;
-    let lastActiveId: string | null = null;
-
-    const findClosestItem = () => {
-      const containerRect = listContainer.getBoundingClientRect();
-      // 컨테이너의 기준점 (위쪽 40% 지점을 기준으로 - 균형잡힌 감지)
-      const targetY = containerRect.top + containerRect.height * 0.4;
-
-      // 스크롤이 맨 위에 있으면 첫 번째 아이템 활성화
-      if (listContainer.scrollTop < 10 && items.length > 0) {
-        return items[0].id;
-      }
-
-      let closestItem: { id: string; distance: number } | null = null;
-
-      Object.entries(itemRefs.current).forEach(([id, el]) => {
-        if (!el) return;
-
-        const rect = (el as HTMLDivElement).getBoundingClientRect();
-        const itemCenterY = rect.top + rect.height / 2;
-        const distance = Math.abs(itemCenterY - targetY);
-
-        // 컨테이너 내에 보이는 아이템만 고려
-        if (
-          rect.bottom > containerRect.top &&
-          rect.top < containerRect.bottom
-        ) {
-          if (!closestItem || distance < closestItem.distance) {
-            closestItem = { id, distance };
-          }
-        }
-      });
-
-      return closestItem?.id || null;
-    };
-
-    const handleScroll = () => {
-      if (!ticking) {
-        requestAnimationFrame(() => {
-          const closestId = findClosestItem();
-
-          if (closestId && closestId !== lastActiveId) {
-            lastActiveId = closestId;
-            setActiveId(closestId);
-
-            const item = items.find(i => i.id === closestId);
-            if (
-              item?.lat &&
-              item?.lng &&
-              mapInstance.current &&
-              window.kakao?.maps
-            ) {
-              // 트리플 스타일: 부드러운 확대 + 이동
-              const currentLevel = mapInstance.current.getLevel();
-
-              // 현재 줌이 멀면 먼저 확대
-              if (currentLevel > 4) {
-                mapInstance.current.setLevel(4, { animate: true });
-              }
-
-              // 부드럽게 애니메이션 이동
-              smoothPanTo(item.lat, item.lng, 400);
-            }
-          }
-
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-
-    // 초기 실행
-    handleScroll();
-
-    listContainer.addEventListener('scroll', handleScroll, { passive: true });
-
-    return () => {
-      listContainer.removeEventListener('scroll', handleScroll);
-    };
-  }, [items]);
-
-  // Search Debounce - Kakao Places API
-  useEffect(() => {
-    if (searchQuery.length > 1) {
-      setIsSearching(true);
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-
-      searchTimeout.current = setTimeout(async () => {
-        const results = await searchPlacesKakao(searchQuery);
-        setSearchResults(results);
-        setIsSearching(false);
-      }, 300); // Kakao API는 더 빠르게 응답
-    } else {
-      setSearchResults([]);
-      setIsSearching(false);
-    }
-    return () => {
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    };
-  }, [searchQuery]);
-
-  const handleSelectPlace = (place: PlaceSearchResult) => {
-    setNewItem({
-      ...newItem,
-      title: place.name,
-      location: place.address,
-      type: place.type,
-      lat: place.lat,
-      lng: place.lng,
-      notes: place.description,
-    });
-    setSearchQuery(place.name);
-    setSearchResults([]); // Clear results after selection
-  };
-
-  const handleAdd = async () => {
-    if (newItem.title) {
-      // Use existing lat/lng if selected from search, otherwise resolve via Kakao
-      let lat = newItem.lat;
-      let lng = newItem.lng;
-      let location = newItem.location || newItem.title;
-
-      if (!lat || !lng) {
-        const coords = await getCoordsFromAddress(newItem.title);
-        if (coords) {
-          lat = coords.lat;
-          lng = coords.lng;
-        } else {
-          // 기본 속초 좌표
-          lat = 38.207;
-          lng = 128.5918;
-        }
-      }
-
-      onAddItem({
-        id: Date.now().toString(),
-        time: newItem.time || '12:00',
-        title: newItem.title,
-        location,
-        type: newItem.type as any,
-        notes: newItem.notes || '',
-        lat,
-        lng,
-      });
-
-      setIsAdding(false);
-      setNewItem({ type: 'activity', time: '12:00' });
-      setSearchQuery('');
-      setSearchResults([]);
-    }
-  };
-
-  const handleEdit = async () => {
-    if (!editingItem || !newItem.title) return;
-
-    // Use existing lat/lng if selected from search, otherwise resolve via Kakao
-    let lat = newItem.lat;
-    let lng = newItem.lng;
-    let location = newItem.location || newItem.title;
-
-    if (!lat || !lng) {
-      const coords = await getCoordsFromAddress(newItem.title);
-      if (coords) {
-        lat = coords.lat;
-        lng = coords.lng;
-      } else {
-        // 기존 좌표 유지 또는 기본 속초 좌표
-        lat = editingItem.lat || 38.207;
-        lng = editingItem.lng || 128.5918;
-      }
-    }
-
-    onEditItem(editingItem.id, {
-      time: newItem.time || '12:00',
-      title: newItem.title,
-      location,
-      type: newItem.type as any,
-      notes: newItem.notes || '',
-      lat,
-      lng,
-    });
-
-    setEditingItem(null);
-    setNewItem({ type: 'activity', time: '12:00' });
-    setSearchQuery('');
-    setSearchResults([]);
-  };
-
-  const handleStartEdit = (item: ItineraryItem) => {
-    setEditingItem(item);
-    setNewItem({
-      title: item.title,
-      location: item.location,
-      time: item.time,
-      type: item.type,
-      notes: item.notes,
-      lat: item.lat,
-      lng: item.lng,
-    });
-    setSearchQuery(item.title);
-  };
-
-  const handleCancelEdit = () => {
-    setEditingItem(null);
-    setIsAdding(false);
-    setNewItem({ type: 'activity', time: '12:00' });
-    setSearchQuery('');
-    setSearchResults([]);
-  };
-
-  const handleSort = () => {
-    if (dragItem.current === null || dragOverItem.current === null) return;
-    const _items = [...items];
-    const draggedItemContent = _items.splice(dragItem.current, 1)[0];
-    _items.splice(dragOverItem.current, 0, draggedItemContent);
-    dragItem.current = null;
-    dragOverItem.current = null;
-    onReorder(_items);
-  };
+import React from 'react';
+import { ItineraryViewProps } from './ItineraryView.types';
+import { useItineraryViewModel } from './ItineraryView.viewmodel';
+
+const ItineraryView: React.FC<ItineraryViewProps> = props => {
+  const {
+    isAdding,
+    setIsAdding,
+    editingItem,
+    activeId,
+    setActiveId,
+    newItem,
+    setNewItem,
+    searchQuery,
+    setSearchQuery,
+    searchResults,
+    isSearching,
+    dragItem,
+    dragOverItem,
+    itemRefs,
+    mapContainerRef,
+    mapInstance,
+    handleSelectPlace,
+    handleAdd,
+    handleEdit,
+    handleStartEdit,
+    handleCancelEdit,
+    handleSort,
+    handleItemClick,
+  } = useItineraryViewModel(props);
 
   const getPlaceIcon = (type: string) => {
     switch (type) {
@@ -514,7 +77,6 @@ const ItineraryView: React.FC<Props> = ({
       {/* 1. Map Area (Top Fixed) */}
       <div className='h-[40vh] w-full bg-slate-100 relative z-0 shrink-0'>
         <div ref={mapContainerRef} className='w-full h-full' />
-        {/* Gradient overlay for better text visibility if we put text on map */}
         <div className='absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-white/20 to-transparent pointer-events-none'></div>
       </div>
 
@@ -552,7 +114,7 @@ const ItineraryView: React.FC<Props> = ({
           {/* Connector Line */}
           <div className='absolute left-[1.6rem] top-3 bottom-10 w-0.5 bg-slate-100 z-0'></div>
 
-          {items.map((item, index) => {
+          {props.items.map((item, index) => {
             const isActive = activeId === item.id;
             return (
               <div
@@ -569,14 +131,7 @@ const ItineraryView: React.FC<Props> = ({
                 onDragEnter={() => (dragOverItem.current = index)}
                 onDragEnd={handleSort}
                 onDragOver={e => e.preventDefault()}
-                onClick={() => {
-                  setActiveId(item.id);
-                  if (item.lat && item.lng && mapInstance.current) {
-                    mapInstance.current.flyTo([item.lat, item.lng], 15, {
-                      animate: true,
-                    });
-                  }
-                }}
+                onClick={() => handleItemClick(item)}
               >
                 {/* Marker Badge in List */}
                 <div className='flex flex-col items-center pt-0.5 min-w-[2rem]'>
@@ -594,14 +149,14 @@ const ItineraryView: React.FC<Props> = ({
 
                 {/* Card */}
                 <div
-                  className={`flex-1 p-3 rounded-xl border transition-all cursor-pointer ${
+                  className={`flex-1 p-3 rounded-xl border transition-all cursor-pointer min-w-0 max-w-full overflow-hidden ${
                     isActive
                       ? 'bg-white border-blue-200 shadow-md ring-1 ring-blue-50'
                       : 'bg-white border-slate-100 shadow-sm'
                   }`}
                 >
-                  <div className='flex justify-between items-start gap-2'>
-                    <div className='flex-1 min-w-0'>
+                  <div className='flex justify-between items-start gap-2 min-w-0'>
+                    <div className='flex-1 min-w-0 overflow-hidden'>
                       <h3
                         className={`font-bold text-[15px] leading-tight truncate ${
                           isActive ? 'text-slate-900' : 'text-slate-600'
@@ -609,8 +164,8 @@ const ItineraryView: React.FC<Props> = ({
                       >
                         {item.title}
                       </h3>
-                      <div className='flex items-center gap-1 mt-0.5 text-[11px] text-slate-400'>
-                        <span className='truncate font-medium'>
+                      <div className='flex items-center gap-1 mt-0.5 text-[11px] text-slate-400 min-w-0'>
+                        <span className='truncate font-medium shrink-0'>
                           {item.type === 'food'
                             ? '식사'
                             : item.type === 'activity'
@@ -619,11 +174,13 @@ const ItineraryView: React.FC<Props> = ({
                             ? '숙소'
                             : '이동'}
                         </span>
-                        <span className='text-slate-300'>|</span>
-                        <span className='truncate'>{item.location}</span>
+                        <span className='text-slate-300 shrink-0'>|</span>
+                        <span className='truncate min-w-0'>
+                          {item.location}
+                        </span>
                       </div>
                       {item.notes && (
-                        <div className='mt-1.5 bg-slate-50 px-2 py-1 rounded text-[10px] text-slate-500 inline-block border border-slate-100'>
+                        <div className='mt-1.5 bg-slate-50 px-2 py-1 rounded text-[10px] text-slate-500 inline-block border border-slate-100 max-w-full truncate'>
                           {item.notes}
                         </div>
                       )}
@@ -646,7 +203,7 @@ const ItineraryView: React.FC<Props> = ({
                       <button
                         onClick={e => {
                           e.stopPropagation();
-                          onRemoveItem(item.id);
+                          props.onRemoveItem(item.id);
                         }}
                         className='text-slate-200 hover:text-red-400'
                       >
@@ -659,14 +216,13 @@ const ItineraryView: React.FC<Props> = ({
             );
           })}
 
-          {items.length === 0 && (
+          {props.items.length === 0 && (
             <div className='text-center py-20 text-slate-300 text-sm'>
               일정을 추가하여 여행을 계획해보세요.
             </div>
           )}
 
-          {/* 마지막 카드가 기준점까지 스크롤될 수 있도록 여유 공간 추가 */}
-          {items.length > 0 && <div className='h-[10vh]' />}
+          {props.items.length > 0 && <div className='h-[10vh]' />}
         </div>
       </div>
 
@@ -755,7 +311,7 @@ const ItineraryView: React.FC<Props> = ({
                 </div>
               ) : null}
 
-              {/* Manual Entry Fields (Only show if manual override needed or editing) */}
+              {/* Manual Entry Fields */}
               <div className='space-y-5 border-t border-slate-100 pt-6'>
                 <div className='flex gap-3'>
                   <div className='flex-1'>

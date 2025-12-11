@@ -368,14 +368,8 @@ const App: React.FC = () => {
       )
       .subscribe();
 
-    // Realtime이 작동하지 않을 경우를 대비한 폴링 (10초마다)
-    const pollingInterval = setInterval(() => {
-      loadTripFromCloud(tripId);
-    }, 10000);
-
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(pollingInterval);
     };
   }, [isDbConnected, tripId]);
 
@@ -426,64 +420,10 @@ const App: React.FC = () => {
     localStorage.setItem('sokcho_messages', JSON.stringify(messages));
   }, [people, expenses, budget, itinerary, messages]);
 
-  // 5. Auto-Save to Cloud (expenses, budget, itinerary만)
-  // ⚠️ people은 절대 auto-save하지 않음! (profile creation과 realtime에서만 업데이트)
-  // ⚠️ messages는 dependency에서 제거! (채팅할 때마다 auto-save 트리거 방지)
-  useEffect(() => {
-    if (isDbConnected && tripId) {
-      const timer = setTimeout(async () => {
-        try {
-          // people 배열은 서버에 그대로 두고, 나머지만 업데이트
-          const serverData = await fetchTrip(tripId);
-          const serverPeople = serverData?.people || [];
-
-          // 🛡️ CRITICAL SAFETY CHECK: 서버에 내 프로필이 없으면 복원!
-          let finalPeople = serverPeople;
-          if (currentUserId) {
-            const serverHasMe = serverPeople.find(
-              (p: Person) => p.id === currentUserId
-            );
-            const localMe = people.find((p: Person) => p.id === currentUserId);
-
-            if (!serverHasMe && localMe) {
-              console.warn(
-                '⚠️ Profile missing on server, restoring:',
-                localMe.name
-              );
-              // 서버의 다른 사람들 + 내 프로필 복원
-              const othersFromServer = serverPeople.filter(
-                (p: Person) => p.id !== currentUserId
-              );
-              finalPeople = [...othersFromServer, localMe];
-            }
-          }
-
-          const data: TripData = {
-            people: finalPeople, // ⚠️ 서버 people OR 복원된 people
-            expenses,
-            budget,
-            itinerary,
-            messages, // ⚠️ 현재 messages 값은 포함 (dependency에서만 제거)
-            currentUserId: currentUserId || undefined,
-          };
-
-          await saveTrip(tripId, data);
-          setLastSynced(new Date());
-        } catch (error) {
-          console.error('Auto-save failed:', error);
-        }
-      }, 2000); // 2s debounce
-      return () => clearTimeout(timer);
-    }
-  }, [
-    expenses,
-    budget,
-    itinerary,
-    // ⚠️ messages 제거: 채팅할 때마다 auto-save 트리거 방지!
-    isDbConnected,
-    tripId,
-    // ⚠️ currentUserId 제거: 프로필 등록 시 auto-save가 트리거되면 race condition 발생!
-  ]);
+  // ✅ Auto-save 제거: 각 handler에서 이미 즉시 저장 중이므로 불필요
+  // - handleAddMessage, handleAddExpense, handleAddItinerary 등에서 saveTrip() 즉시 호출
+  // - Realtime subscription이 다른 사용자의 변경사항 자동 동기화
+  // - Auto-save는 중복 저장 + 무한 루프 위험만 있음
 
   const handleProfileSetupComplete = async (
     nickname: string,
@@ -556,14 +496,13 @@ const App: React.FC = () => {
           profilePic: profile.profilePic,
         }));
 
-        // trips 테이블은 people 제외하고 저장 (또는 캐시로만 사용)
-        const serverData = await fetchTrip(tripId);
+        // trips 테이블은 people 제외하고 저장 (낙관적 업데이트 - fetchTrip 제거)
         const data: TripData = {
           people: allPeople, // user_profiles에서 가져온 전체 리스트
-          expenses: serverData?.expenses || expenses,
-          budget: serverData?.budget || budget,
-          itinerary: serverData?.itinerary || itinerary,
-          messages: serverData?.messages || messages,
+          expenses,
+          budget,
+          itinerary,
+          messages,
           currentUserId: newUserId,
         };
 
@@ -670,39 +609,19 @@ const App: React.FC = () => {
 
   // 일정 추가 시 즉시 서버에 저장
   const handleAddItinerary = async (item: ItineraryItem) => {
-    let currentItinerary: ItineraryItem[] = [];
+    // ✅ 로컬 상태 먼저 업데이트 (낙관적 업데이트)
+    const updatedItinerary = [...itinerary, item];
+    setItinerary(updatedItinerary);
 
-    // ✅ 함수형 업데이트로 최신 상태 보장하고 현재 값도 캡처
-    setItinerary((prev: ItineraryItem[]) => {
-      currentItinerary = [...prev, item];
-      return currentItinerary;
-    });
-
-    // Supabase에 즉시 저장 (로컬 최신 상태 사용)
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
-
         await saveTrip(tripId, {
-          people: finalPeople,
-          expenses: serverData?.expenses || expenses,
-          budget: serverData?.budget || budget,
-          itinerary: currentItinerary, // ✅ 로컬 최신 상태 직접 사용
-          messages: serverData?.messages || messages,
+          people,
+          expenses,
+          budget,
+          itinerary: updatedItinerary,
+          messages,
           currentUserId: currentUserId || undefined,
         });
         console.log('✅ Itinerary added and synced to server');
@@ -712,41 +631,21 @@ const App: React.FC = () => {
     }
   };
 
-  // 지출 추가 시 즉시 서버에 저장
+  // 지출 추가 시 즉시 서버에 저장 (낙관적 업데이트)
   const handleAddExpense = async (expense: Expense) => {
-    let currentExpenses: Expense[] = [];
+    // ✅ 로컬 상태 먼저 업데이트
+    const updatedExpenses = [...expenses, expense];
+    setExpenses(updatedExpenses);
 
-    // ✅ 함수형 업데이트로 최신 상태 보장하고 현재 값도 캡처
-    setExpenses((prev: Expense[]) => {
-      currentExpenses = [...prev, expense];
-      return currentExpenses;
-    });
-
-    // Supabase에 즉시 저장 (로컬 최신 상태 사용)
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
-
         await saveTrip(tripId, {
-          people: finalPeople,
-          expenses: currentExpenses, // ✅ 로컬 최신 상태 직접 사용
-          budget: serverData?.budget || budget,
-          itinerary: serverData?.itinerary || itinerary,
-          messages: serverData?.messages || messages,
+          people,
+          expenses: updatedExpenses,
+          budget,
+          itinerary,
+          messages,
           currentUserId: currentUserId || undefined,
         });
         console.log('✅ Expense added and synced to server');
@@ -756,35 +655,19 @@ const App: React.FC = () => {
     }
   };
 
-  // 예산 설정 시 즉시 서버에 저장
+  // 예산 설정 시 즉시 서버에 저장 (낙관적 업데이트)
   const handleSetBudget = async (amount: number) => {
     setBudget(amount);
 
-    // Supabase에 즉시 저장 (race condition 방지)
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
-        // ✅ 서버의 최신 데이터 사용, 방금 설정한 예산만 교체
         await saveTrip(tripId, {
-          people: finalPeople,
-          expenses: serverData?.expenses || expenses,
+          people,
+          expenses,
           budget: amount,
-          itinerary: serverData?.itinerary || itinerary,
-          messages: serverData?.messages || messages,
+          itinerary,
+          messages,
           currentUserId: currentUserId || undefined,
         });
         console.log('✅ Budget set and synced to server');
@@ -794,51 +677,26 @@ const App: React.FC = () => {
     }
   };
 
-  // 일정 수정 시 즉시 서버에 저장
+  // 일정 수정 시 즉시 서버에 저장 (낙관적 업데이트)
   const handleEditItinerary = async (
     id: string,
     updates: Partial<ItineraryItem>
   ) => {
-    // ✅ 함수형 업데이트로 최신 상태 보장
-    setItinerary((prev: ItineraryItem[]) =>
-      prev.map((i) => (i.id === id ? { ...i, ...updates } : i))
+    // ✅ 로컬 상태 먼저 업데이트
+    const updatedItinerary = itinerary.map((i) =>
+      i.id === id ? { ...i, ...updates } : i
     );
+    setItinerary(updatedItinerary);
 
-    // Supabase에 즉시 저장
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
-
-        // ✅ 서버 데이터와 merge: 수정된 항목을 업데이트
-        const serverItinerary = serverData?.itinerary || [];
-        const mergedItinerary = serverItinerary.map((i: ItineraryItem) =>
-          i.id === id ? { ...i, ...updates } : i
-        );
-        // 서버에 없으면 추가 (방어 코드)
-        if (!serverItinerary.find((i: ItineraryItem) => i.id === id)) {
-          mergedItinerary.push({ ...updates, id } as ItineraryItem);
-        }
-
         await saveTrip(tripId, {
-          people: finalPeople,
-          expenses: serverData?.expenses || expenses,
-          budget: serverData?.budget || budget,
-          itinerary: mergedItinerary,
-          messages: serverData?.messages || messages,
+          people,
+          expenses,
+          budget,
+          itinerary: updatedItinerary,
+          messages,
           currentUserId: currentUserId || undefined,
         });
         console.log('✅ Itinerary edited and synced to server');
@@ -848,42 +706,21 @@ const App: React.FC = () => {
     }
   };
 
-  // 일정 삭제 시 즉시 서버에 저장
+  // 일정 삭제 시 즉시 서버에 저장 (낙관적 업데이트)
   const handleRemoveItinerary = async (id: string) => {
-    // ✅ 함수형 업데이트로 최신 상태 보장
-    setItinerary((prev: ItineraryItem[]) => prev.filter((i) => i.id !== id));
+    // ✅ 로컬 상태 먼저 업데이트
+    const updatedItinerary = itinerary.filter((i) => i.id !== id);
+    setItinerary(updatedItinerary);
 
-    // Supabase에 즉시 저장
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
-
-        // ✅ 서버 데이터에서 해당 항목 제거
-        const serverItinerary = serverData?.itinerary || [];
-        const mergedItinerary = serverItinerary.filter(
-          (i: ItineraryItem) => i.id !== id
-        );
-
         await saveTrip(tripId, {
-          people: finalPeople,
-          expenses: serverData?.expenses || expenses,
-          budget: serverData?.budget || budget,
-          itinerary: mergedItinerary,
-          messages: serverData?.messages || messages,
+          people,
+          expenses,
+          budget,
+          itinerary: updatedItinerary,
+          messages,
           currentUserId: currentUserId || undefined,
         });
         console.log('✅ Itinerary deleted and synced to server');
@@ -915,12 +752,14 @@ const App: React.FC = () => {
     const updatedMessages = [...messages, newMessage];
     setMessages(updatedMessages);
 
-    // ✅ 메시지 즉시 서버에 저장 (채팅 시 auto-save 트리거 방지)
+    // ✅ 메시지 즉시 서버에 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
         await saveTrip(tripId, {
-          ...serverData,
+          people,
+          expenses,
+          budget,
+          itinerary,
           messages: updatedMessages, // 새 메시지 포함
         });
         console.log('💬 Message saved to server immediately');
@@ -930,40 +769,21 @@ const App: React.FC = () => {
     }
   };
 
-  // 지출 삭제 시 즉시 서버에 저장
+  // 지출 삭제 시 즉시 서버에 저장 (낙관적 업데이트)
   const handleRemoveExpense = async (id: string) => {
-    // ✅ 함수형 업데이트로 최신 상태 보장
-    setExpenses((prev: Expense[]) => prev.filter((e) => e.id !== id));
+    // ✅ 로컬 상태 먼저 업데이트
+    const updatedExpenses = expenses.filter((e) => e.id !== id);
+    setExpenses(updatedExpenses);
 
-    // Supabase에 즉시 저장 (race condition 방지)
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
-
-        // ✅ 서버 데이터에서 해당 항목 제거
-        const serverExpenses = serverData?.expenses || [];
-        const mergedExpenses = serverExpenses.filter((e: Expense) => e.id !== id);
-
         await saveTrip(tripId, {
-          people: finalPeople,
-          expenses: mergedExpenses,
-          budget: serverData?.budget || budget,
-          itinerary: serverData?.itinerary || itinerary,
-          messages: serverData?.messages || messages,
+          people,
+          expenses: updatedExpenses,
+          budget,
+          itinerary,
+          messages,
           currentUserId: currentUserId || undefined,
         });
         console.log('✅ Expense deleted and synced to server');
@@ -973,30 +793,15 @@ const App: React.FC = () => {
     }
   };
 
-  // Admin 초기화 함수들
+  // Admin 초기화 함수들 (낙관적 업데이트)
   const handleAdminClearExpenses = async () => {
     setExpenses([]);
     localStorage.removeItem('sokcho_expenses');
-    // Supabase에 즉시 저장
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
         await saveTrip(tripId, {
-          people: finalPeople,
+          people,
           expenses: [],
           budget,
           itinerary,
@@ -1012,26 +817,11 @@ const App: React.FC = () => {
   const handleAdminClearItinerary = async () => {
     setItinerary([]);
     localStorage.removeItem('sokcho_itinerary');
-    // Supabase에 즉시 저장
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
         await saveTrip(tripId, {
-          people: finalPeople,
+          people,
           expenses,
           budget,
           itinerary: [],
@@ -1047,26 +837,11 @@ const App: React.FC = () => {
   const handleAdminClearMessages = async () => {
     setMessages([]);
     localStorage.removeItem('sokcho_messages');
-    // Supabase에 즉시 저장
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
         await saveTrip(tripId, {
-          people: finalPeople,
+          people,
           expenses,
           budget,
           itinerary,
@@ -1082,26 +857,11 @@ const App: React.FC = () => {
   const handleAdminResetBudget = async () => {
     setBudget(0);
     localStorage.removeItem('sokcho_budget');
-    // Supabase에 즉시 저장
+    // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
       try {
-        const serverData = await fetchTrip(tripId);
-        const serverPeople = serverData?.people || [];
-        let finalPeople = serverPeople;
-        if (currentUserId) {
-          const serverHasMe = serverPeople.find(
-            (p: Person) => p.id === currentUserId
-          );
-          const localMe = people.find((p: Person) => p.id === currentUserId);
-          if (!serverHasMe && localMe) {
-            const othersFromServer = serverPeople.filter(
-              (p: Person) => p.id !== currentUserId
-            );
-            finalPeople = [...othersFromServer, localMe];
-          }
-        }
         await saveTrip(tripId, {
-          people: finalPeople,
+          people,
           expenses,
           budget: 0,
           itinerary,

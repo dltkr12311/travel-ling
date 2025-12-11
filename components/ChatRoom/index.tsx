@@ -1,86 +1,26 @@
 import { Bot, Send } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
-import { GroupChatMessage, Person } from '../types';
+import React from 'react';
+import { ChatRoomProps } from './ChatRoom.types';
+import { useChatRoomViewModel } from './ChatRoom.viewmodel';
 
-interface ChatRoomProps {
-  currentUserId: string;
-  people: Person[];
-  messages: GroupChatMessage[];
-  onSendMessage: (text: string) => void;
-}
+const ChatRoom: React.FC<ChatRoomProps> = (props) => {
+  const {
+    inputText,
+    setInputText,
+    navHeight,
+    messagesEndRef,
+    handleSend,
+    handleKeyDown,
+    getPerson,
+    formatTime,
+  } = useChatRoomViewModel(props);
 
-const ChatRoom: React.FC<ChatRoomProps> = ({
-  currentUserId,
-  people,
-  messages,
-  onSendMessage,
-}) => {
-  const [inputText, setInputText] = useState('');
-  const [navHeight, setNavHeight] = useState('3.5rem');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // 네비게이션 높이 측정
-  useEffect(() => {
-    const updateNavHeight = () => {
-      const nav = document.getElementById('bottom-navigation');
-      if (nav) {
-        const height = nav.offsetHeight;
-        setNavHeight(`${height}px`);
-      }
-    };
-
-    updateNavHeight();
-    window.addEventListener('resize', updateNavHeight);
-    // 초기 렌더링 후에도 다시 측정
-    setTimeout(updateNavHeight, 100);
-
-    return () => window.removeEventListener('resize', updateNavHeight);
-  }, []);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const handleSend = () => {
-    if (inputText.trim()) {
-      onSendMessage(inputText.trim());
-      setInputText('');
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // 한글 입력 중(IME composition)에는 메시지 전송하지 않음
-    if (e.nativeEvent.isComposing) return;
-
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const getPerson = (userId: string): Person | undefined => {
-    return people.find(p => p.id === userId);
-  };
-
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('ko-KR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const renderMessage = (message: GroupChatMessage) => {
+  const renderMessage = (message: typeof props.messages[0]) => {
     const person = getPerson(message.userId);
-    const isMe = message.userId === currentUserId;
+    const isMe = message.userId === props.currentUserId;
     const isAI = message.userId === 'ai';
     const isSystem = message.userId === 'system';
 
-    // System Message (Center)
     if (isSystem) {
       return (
         <div key={message.id} className='flex justify-center my-4'>
@@ -91,7 +31,6 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
       );
     }
 
-    // AI Message (Left, Special)
     if (isAI) {
       return (
         <div key={message.id} className='flex justify-start mb-4'>
@@ -119,9 +58,7 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
       );
     }
 
-    // User Message
     if (isMe) {
-      // My Message (Right)
       return (
         <div key={message.id} className='flex justify-end mb-4'>
           <div className='flex gap-2 max-w-[75%]'>
@@ -143,7 +80,6 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
         </div>
       );
     } else {
-      // Other User Message (Left)
       return (
         <div key={message.id} className='flex justify-start mb-4'>
           <div className='flex gap-2 max-w-[75%]'>
@@ -173,15 +109,14 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
 
   return (
     <div className='flex flex-col h-full bg-slate-50'>
-      {/* Header */}
       <div className='bg-white border-b border-slate-200 px-5 py-3 shrink-0'>
         <div className='flex items-center justify-between'>
           <div>
             <h2 className='text-base font-black text-slate-900'>단체 채팅방</h2>
-            <p className='text-xs text-slate-500'>{people.length}명 참여 중</p>
+            <p className='text-xs text-slate-500'>{props.people.length}명 참여 중</p>
           </div>
           <div className='flex -space-x-2'>
-            {people.slice(0, 4).map(person => (
+            {props.people.slice(0, 4).map(person => (
               <div
                 key={person.id}
                 className='w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm border-2 border-white shadow-sm'
@@ -189,18 +124,17 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
                 {person.profilePic || '👤'}
               </div>
             ))}
-            {people.length > 4 && (
+            {props.people.length > 4 && (
               <div className='w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 text-xs font-bold border-2 border-white shadow-sm'>
-                +{people.length - 4}
+                +{props.people.length - 4}
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Messages List */}
       <div className='flex-1 overflow-y-auto px-5 py-4 pb-20'>
-        {messages.length === 0 ? (
+        {props.messages.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full text-center'>
             <div className='w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-3'>
               <Bot size={32} className='text-slate-400' />
@@ -214,13 +148,12 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
           </div>
         ) : (
           <>
-            {messages.map(message => renderMessage(message))}
+            {props.messages.map(message => renderMessage(message))}
             <div ref={messagesEndRef} />
           </>
         )}
       </div>
 
-      {/* Input Area */}
       <div
         className='fixed bg-white border-t border-slate-200 px-5 py-2 z-50'
         style={{
@@ -258,3 +191,4 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
 };
 
 export default ChatRoom;
+
