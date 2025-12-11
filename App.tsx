@@ -29,6 +29,7 @@ import {
   initSupabase,
   saveTrip,
 } from './services/supabaseService';
+import { notificationService } from './services/notificationService';
 import {
   Expense,
   GroupChatMessage,
@@ -188,6 +189,30 @@ const App: React.FC = () => {
     if (supabaseUrl && supabaseKey) {
       verifyConnection();
     }
+  }, []);
+
+  // Initialize push notification service
+  useEffect(() => {
+    const initNotifications = async () => {
+      try {
+        const enabled = await notificationService.initialize();
+        if (enabled) {
+          console.log('✅ Push notifications enabled');
+        } else {
+          console.warn('⚠️ Push notifications not available');
+
+          // Show helpful tip for common issues
+          if (!window.isSecureContext) {
+            console.warn('💡 HTTPS required for notifications');
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to initialize notifications:', error);
+      }
+    };
+
+    // Delay initialization to ensure DOM is ready
+    setTimeout(initNotifications, 1000);
   }, []);
 
   // 1.5. Update userId when tripId changes
@@ -637,6 +662,19 @@ const App: React.FC = () => {
     // ✅ 로컬 상태 먼저 업데이트
     const updatedExpenses = [...expenses, expense];
     setExpenses(updatedExpenses);
+
+    // 📢 Push notification: Show budget status after expense
+    const totalSpent = updatedExpenses.reduce((sum, e) => sum + e.amount, 0);
+    const remaining = budget - totalSpent;
+
+    if (budget > 0) {
+      await notificationService.showBudgetNotification({
+        spent: totalSpent,
+        remaining: remaining,
+        budget: budget,
+        expenseDescription: expense.description,
+      });
+    }
 
     // Supabase에 즉시 저장 (낙관적 업데이트 - fetchTrip 제거)
     if (isDbConnected && tripId) {
