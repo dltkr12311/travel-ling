@@ -282,3 +282,29 @@ export const getAllTripProfiles = async (
     return [];
   }
 };
+
+/**
+ * Clear all user profiles for a trip (Admin function)
+ */
+export const clearAllTripProfiles = async (
+  tripId: string
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('user_profiles')
+      .delete()
+      .eq('trip_id', tripId);
+
+    if (error) {
+      console.error('Failed to clear trip profiles:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Failed to clear trip profiles:', error);
+    return false;
+  }
+};

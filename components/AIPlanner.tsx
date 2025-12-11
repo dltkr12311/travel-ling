@@ -617,7 +617,7 @@ const AIPlanner: React.FC<Props> = ({
                 <div className='flex items-center gap-2 mb-4'>
                   <Sunrise size={16} className='text-orange-400' />
                   <span className='text-orange-400 text-xs font-bold uppercase tracking-wider'>
-                    12월 13일 설악산 일출
+                    12월 13일 청대산 일출
                   </span>
                 </div>
 
@@ -641,7 +641,7 @@ const AIPlanner: React.FC<Props> = ({
                         </span>
                       </div>
                       <p className='text-slate-400 text-xs mt-1 font-medium'>
-                        울산바위 정상 기준
+                        청대산 정상 기준
                       </p>
                     </div>
 
@@ -723,7 +723,7 @@ const AIPlanner: React.FC<Props> = ({
                 </button>
 
                 <button
-                  onClick={() => handleQuickAction('울산바위 등산 코스 알려줘')}
+                  onClick={() => handleQuickAction('청대산 등산 코스 알려줘')}
                   className='bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all active:scale-[0.98] text-left group'
                 >
                   <div className='w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform'>
@@ -731,7 +731,7 @@ const AIPlanner: React.FC<Props> = ({
                   </div>
                   <p className='font-bold text-slate-800 text-sm'>등산 정보</p>
                   <p className='text-slate-400 text-[11px] mt-0.5'>
-                    "울산바위 코스"
+                    "청대산 코스"
                   </p>
                 </button>
               </div>

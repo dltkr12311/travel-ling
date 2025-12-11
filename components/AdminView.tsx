@@ -25,6 +25,11 @@ interface Props {
   onSetBudget: (budget: number) => void;
   onSetMessages: (messages: GroupChatMessage[]) => void;
   onExit: () => void;
+  onClearExpenses?: () => Promise<void>;
+  onClearItinerary?: () => Promise<void>;
+  onClearMessages?: () => Promise<void>;
+  onResetBudget?: () => Promise<void>;
+  onResetAll?: () => Promise<void>;
 }
 
 const AdminView: React.FC<Props> = ({
@@ -39,6 +44,11 @@ const AdminView: React.FC<Props> = ({
   onSetBudget,
   onSetMessages,
   onExit,
+  onClearExpenses,
+  onClearItinerary,
+  onClearMessages,
+  onResetBudget,
+  onResetAll,
 }) => {
   const [showAddMember, setShowAddMember] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
@@ -85,46 +95,82 @@ const AdminView: React.FC<Props> = ({
     onSetPeople(people.filter(p => p.id !== id));
   };
 
-  const handleResetAll = () => {
+  const handleResetAll = async () => {
     if (confirm('모든 데이터를 초기화합니다. 계속할까요?')) {
-      onSetPeople([{ id: 'p1', name: '나' }]);
-      onSetExpenses([]);
-      onSetItinerary([]);
-      onSetBudget(0);
-      onSetMessages([]);
-      localStorage.removeItem('sokcho_people');
-      localStorage.removeItem('sokcho_expenses');
-      localStorage.removeItem('sokcho_itinerary');
-      localStorage.removeItem('sokcho_budget');
-      localStorage.removeItem('sokcho_messages');
-      localStorage.removeItem('current_user_id');
-      localStorage.removeItem('sokcho_trip_id');
+      if (onResetAll) {
+        await onResetAll();
+      } else {
+        // Fallback: 기존 방식
+        onSetPeople([{ id: 'p1', name: '나' }]);
+        onSetExpenses([]);
+        onSetItinerary([]);
+        onSetBudget(0);
+        onSetMessages([]);
+        localStorage.removeItem('sokcho_people');
+        localStorage.removeItem('sokcho_expenses');
+        localStorage.removeItem('sokcho_itinerary');
+        localStorage.removeItem('sokcho_budget');
+        localStorage.removeItem('sokcho_messages');
+        localStorage.removeItem('current_user_id');
+        localStorage.removeItem('sokcho_trip_id');
+      }
       alert('모든 데이터가 초기화되었습니다.');
     }
   };
 
-  const handleClearExpenses = () => {
+  const handleClearExpenses = async () => {
     if (
       confirm(`지출 내역 ${expenses.length}건을 모두 삭제합니다. 계속할까요?`)
     ) {
-      onSetExpenses([]);
+      if (onClearExpenses) {
+        await onClearExpenses();
+      } else {
+        // Fallback: 기존 방식
+        onSetExpenses([]);
+        localStorage.removeItem('sokcho_expenses');
+      }
       alert('지출 내역이 초기화되었습니다.');
     }
   };
 
-  const handleClearItinerary = () => {
+  const handleClearItinerary = async () => {
     if (confirm(`일정 ${itinerary.length}건을 모두 삭제합니다. 계속할까요?`)) {
-      onSetItinerary([]);
+      if (onClearItinerary) {
+        await onClearItinerary();
+      } else {
+        // Fallback: 기존 방식
+        onSetItinerary([]);
+        localStorage.removeItem('sokcho_itinerary');
+      }
       alert('일정이 초기화되었습니다.');
     }
   };
 
-  const handleClearMessages = () => {
+  const handleClearMessages = async () => {
     if (
       confirm(`채팅 메시지 ${messages.length}건을 모두 삭제합니다. 계속할까요?`)
     ) {
-      onSetMessages([]);
+      if (onClearMessages) {
+        await onClearMessages();
+      } else {
+        // Fallback: 기존 방식
+        onSetMessages([]);
+        localStorage.removeItem('sokcho_messages');
+      }
       alert('채팅 메시지가 초기화되었습니다.');
+    }
+  };
+
+  const handleResetBudget = async () => {
+    if (confirm('예산을 초기화합니다. 계속할까요?')) {
+      if (onResetBudget) {
+        await onResetBudget();
+      } else {
+        // Fallback: 기존 방식
+        onSetBudget(0);
+        localStorage.removeItem('sokcho_budget');
+      }
+      alert('예산이 초기화되었습니다.');
     }
   };
 
@@ -172,8 +218,9 @@ const AdminView: React.FC<Props> = ({
                     <p className='text-xs text-slate-500'>
                       ID: {person.id}
                       {person.joinedAt &&
-                        ` • 가입: ${new Date(person.joinedAt).toLocaleDateString('ko-KR')}`
-                      }
+                        ` • 가입: ${new Date(
+                          person.joinedAt
+                        ).toLocaleDateString('ko-KR')}`}
                     </p>
                   </div>
                 </div>
@@ -356,7 +403,7 @@ const AdminView: React.FC<Props> = ({
             </button>
 
             <button
-              onClick={() => onSetBudget(0)}
+              onClick={handleResetBudget}
               disabled={budget === 0}
               className='w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:hover:bg-slate-800 p-4 rounded-2xl flex items-center justify-between transition-colors'
             >

@@ -361,25 +361,8 @@ const App: React.FC = () => {
             setExpenses(data.expenses);
             setBudget(data.budget);
             setItinerary(data.itinerary);
-            // 메시지 병합 (id 기준 중복 제거)
-            setMessages((prev: GroupChatMessage[]) => {
-              const serverMessages = data.messages || [];
-              const allMessages = [...prev];
-
-              // 서버 메시지 중 로컬에 없는 것만 추가
-              serverMessages.forEach((msg: GroupChatMessage) => {
-                if (!allMessages.find(m => m.id === msg.id)) {
-                  allMessages.push(msg);
-                }
-              });
-
-              // timestamp 순으로 정렬
-              return allMessages.sort(
-                (a, b) =>
-                  new Date(a.timestamp).getTime() -
-                  new Date(b.timestamp).getTime()
-              );
-            });
+            // 메시지는 서버 데이터로 덮어쓰기 (서버가 Source of Truth)
+            setMessages(data.messages || []);
           }
         }
       )
@@ -426,24 +409,8 @@ const App: React.FC = () => {
       setExpenses(data.expenses);
       setBudget(data.budget);
       setItinerary(data.itinerary);
-      // 메시지 병합 (id 기준 중복 제거)
-      setMessages((prev: GroupChatMessage[]) => {
-        const serverMessages = data.messages || [];
-        const allMessages = [...prev];
-
-        // 서버 메시지 중 로컬에 없는 것만 추가
-        serverMessages.forEach((msg: GroupChatMessage) => {
-          if (!allMessages.find(m => m.id === msg.id)) {
-            allMessages.push(msg);
-          }
-        });
-
-        // timestamp 순으로 정렬
-        return allMessages.sort(
-          (a, b) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-      });
+      // 메시지는 서버 데이터로 덮어쓰기 (서버가 Source of Truth)
+      setMessages(data.messages || []);
       setLastSynced(new Date());
     }
     setIsSyncing(false);
@@ -721,6 +688,208 @@ const App: React.FC = () => {
     setMessages((prev: GroupChatMessage[]) => [...prev, newMessage]);
   };
 
+  // Admin 초기화 함수들
+  const handleAdminClearExpenses = async () => {
+    setExpenses([]);
+    localStorage.removeItem('sokcho_expenses');
+    // Supabase에 즉시 저장
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses: [],
+          budget,
+          itinerary,
+          messages,
+          currentUserId: currentUserId || undefined,
+        });
+      } catch (error) {
+        console.error('Failed to save after clear expenses:', error);
+      }
+    }
+  };
+
+  const handleAdminClearItinerary = async () => {
+    setItinerary([]);
+    localStorage.removeItem('sokcho_itinerary');
+    // Supabase에 즉시 저장
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses,
+          budget,
+          itinerary: [],
+          messages,
+          currentUserId: currentUserId || undefined,
+        });
+      } catch (error) {
+        console.error('Failed to save after clear itinerary:', error);
+      }
+    }
+  };
+
+  const handleAdminClearMessages = async () => {
+    setMessages([]);
+    localStorage.removeItem('sokcho_messages');
+    // Supabase에 즉시 저장
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses,
+          budget,
+          itinerary,
+          messages: [],
+          currentUserId: currentUserId || undefined,
+        });
+      } catch (error) {
+        console.error('Failed to save after clear messages:', error);
+      }
+    }
+  };
+
+  const handleAdminResetBudget = async () => {
+    setBudget(0);
+    localStorage.removeItem('sokcho_budget');
+    // Supabase에 즉시 저장
+    if (isDbConnected && tripId) {
+      try {
+        const serverData = await fetchTrip(tripId);
+        const serverPeople = serverData?.people || [];
+        let finalPeople = serverPeople;
+        if (currentUserId) {
+          const serverHasMe = serverPeople.find(
+            (p: Person) => p.id === currentUserId
+          );
+          const localMe = people.find((p: Person) => p.id === currentUserId);
+          if (!serverHasMe && localMe) {
+            const othersFromServer = serverPeople.filter(
+              (p: Person) => p.id !== currentUserId
+            );
+            finalPeople = [...othersFromServer, localMe];
+          }
+        }
+        await saveTrip(tripId, {
+          people: finalPeople,
+          expenses,
+          budget: 0,
+          itinerary,
+          messages,
+          currentUserId: currentUserId || undefined,
+        });
+      } catch (error) {
+        console.error('Failed to save after reset budget:', error);
+      }
+    }
+  };
+
+  const handleAdminResetAll = async () => {
+    const defaultPeople = [{ id: 'p1', name: '나' }];
+    setPeople(defaultPeople);
+    setExpenses([]);
+    setItinerary([]);
+    setBudget(0);
+    setMessages([]);
+
+    // currentUserId 초기화
+    setCurrentUserId(null);
+
+    // localStorage 삭제
+    localStorage.removeItem('sokcho_people');
+    localStorage.removeItem('sokcho_expenses');
+    localStorage.removeItem('sokcho_itinerary');
+    localStorage.removeItem('sokcho_budget');
+    localStorage.removeItem('sokcho_messages');
+    localStorage.removeItem('current_user_id');
+    localStorage.removeItem('sokcho_trip_id');
+
+    // tripId 관련 항목들도 삭제
+    if (tripId) {
+      localStorage.removeItem(`user_id_${tripId}`);
+      localStorage.removeItem(`display_id_${tripId}`);
+    }
+
+    // Supabase URL/Key도 삭제 (완전 초기화)
+    localStorage.removeItem('supabase_url');
+    localStorage.removeItem('supabase_key');
+
+    // Supabase DB 완전 초기화
+    if (isDbConnected && tripId) {
+      try {
+        // 1. user_profiles 테이블 초기화
+        const { clearAllTripProfiles } = await import(
+          './services/supabaseService'
+        );
+        await clearAllTripProfiles(tripId);
+        console.log('✅ User profiles cleared from database');
+
+        // 2. trips 테이블 초기화
+        await saveTrip(tripId, {
+          people: defaultPeople,
+          expenses: [],
+          budget: 0,
+          itinerary: [],
+          messages: [],
+          currentUserId: undefined,
+        });
+        console.log('✅ Trip data cleared from database');
+      } catch (error) {
+        console.error('Failed to clear database:', error);
+      }
+    }
+
+    // Supabase 연결 상태 초기화
+    setIsDbConnected(false);
+    setSupabaseUrl('');
+    setSupabaseKey('');
+  };
+
   // ===== ADMIN PAGE =====
   if (isAdminMode) {
     return (
@@ -736,6 +905,11 @@ const App: React.FC = () => {
         onSetBudget={setBudget}
         onSetMessages={setMessages}
         onExit={exitAdminMode}
+        onClearExpenses={handleAdminClearExpenses}
+        onClearItinerary={handleAdminClearItinerary}
+        onClearMessages={handleAdminClearMessages}
+        onResetBudget={handleAdminResetBudget}
+        onResetAll={handleAdminResetAll}
       />
     );
   }
